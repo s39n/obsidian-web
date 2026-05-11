@@ -111,6 +111,10 @@ const MOBILE_SCRIPTS = [
   }
 
   function makeCryptoShim() {
+    // Mirror of client/boot.js makeCryptoShim — keeps desktop and mobile
+    // runtimes in sync. WebCrypto's subtle.digest is async-only; we expose
+    // a callback-based async path on .digest() and a sync path that warns
+    // and returns empty. Algo names mapped from Node to WebCrypto.
     return {
       randomBytes: function(n) {
         var arr = new Uint8Array(n);
@@ -121,12 +125,43 @@ const MOBILE_SCRIPTS = [
         };
         return arr;
       },
-      createHash: function() {
+      createHash: function(algo) {
+        // Map Node algo names to WebCrypto names. md5 falls back to SHA-256
+        // (browsers don't ship MD5); callers that need real MD5 must bundle
+        // their own (e.g. spark-md5, as LiveSync already does).
+        var algoMap = { sha1: 'SHA-1', sha256: 'SHA-256', sha512: 'SHA-512', md5: 'SHA-256' };
+        var subtleAlgo = algoMap[(algo || '').toLowerCase()] || 'SHA-256';
         var chunks = [];
-        return {
-          update: function(d){ chunks.push(typeof d==='string'?new TextEncoder().encode(d):d); return this; },
-          digest: function(enc){ console.warn('[obsidian-web] createHash().digest() sync — returning empty'); return enc==='hex'?'':new Uint8Array(0); },
+        var hash = {
+          update: function(d){ chunks.push(typeof d==='string'?new TextEncoder().encode(d):d); return hash; },
+          digest: function(encoding, cb){
+            if (typeof encoding === 'function') { cb = encoding; encoding = 'hex'; }
+            // Async path — caller provided a callback.
+            if (typeof cb === 'function') {
+              var totalLen = 0;
+              for (var k = 0; k < chunks.length; k++) totalLen += chunks[k].length;
+              var combined = new Uint8Array(totalLen);
+              var off = 0;
+              for (var j = 0; j < chunks.length; j++) { combined.set(chunks[j], off); off += chunks[j].length; }
+              crypto.subtle.digest(subtleAlgo, combined).then(function(buf){
+                var bytes = new Uint8Array(buf);
+                if (encoding === 'hex') {
+                  var s = '';
+                  for (var i = 0; i < bytes.length; i++) s += bytes[i].toString(16).padStart(2, '0');
+                  cb(null, s);
+                } else {
+                  cb(null, bytes);
+                }
+              }).catch(function(err){ cb(err); });
+              return hash;
+            }
+            // Sync path: WebCrypto cannot hash synchronously. Warn so we can
+            // spot if something actually relies on it.
+            console.warn('[obsidian-web] crypto.createHash(' + algo + ').digest() called synchronously — returning empty. If this causes issues, wrap the caller to use the async (callback) path.');
+            return encoding === 'hex' ? '' : new Uint8Array(0);
+          },
         };
+        return hash;
       },
     };
   }

@@ -30,6 +30,36 @@ Vault
 └── plain Markdown files (the user's actual content)
 ```
 
+### Two parallel client runtimes — `client/` vs `client-mobile/`
+
+The same Node.js server (`server/`) hosts two completely separate browser
+runtimes that share its API:
+
+| Route | Bundle loaded | Adapter chosen | Shim layer | Use case |
+|---|---|---|---|---|
+| `/` | `obsidian/app.js` (desktop) | `FileSystemAdapter` via `original-fs` shim | `client/shims/*` (electron, original-fs, ipcRenderer, …) | Legacy fallback; desktop-class plugin compatibility (full Node API surface). |
+| `/mobile` | `obsidian-mobile/app.js` (Android APK bundle) | `CapacitorAdapter` via `capacitor-shim.js` | `client-mobile/shims/capacitor-shim.js` + minimal node shims (path, url, os, crypto, …) | Preferred runtime. Uses Obsidian's mobile codepaths (no sync XHR, no Electron assumptions). Layout (mobile/desktop UI) chosen at boot via `__owPlatformOverrides`. |
+
+```
+                  ┌── /         → client/index.html        → desktop bundle + electron shims
+Browser → server ─┤
+                  └── /mobile   → client-mobile/index.html → mobile bundle + Capacitor shim
+                        │
+                        ├── share /api/*  (fs, watch, bootstrap, vaults, electron)
+                        └── share obsidian/* and obsidian-mobile/* static assets
+```
+
+**Default recommendation:** `/mobile`. It's lighter (3.6 MB bundle vs 7+ MB),
+has no sync XHR (so no deprecation pressure), and the build-time Platform
+patches let it serve both desktop and mobile UI layouts via the layout switcher
+plugin. The desktop runtime stays available for plugins that need full Node/
+Electron surface (e.g. obsidian-git that shells out to `git`).
+
+**Long-term plan:** keep both. Removing the desktop runtime would lose
+plugin compatibility for any plugin that touches Electron `remote` or
+`child_process`. See `docs/investigations.md` for the deep dive on what
+each adapter expects.
+
 ## Status
 
 - Boot loads, all shims install successfully.
@@ -157,6 +187,110 @@ See `docs/investigations.md` for solved issues and debugging notes.
 ## Integration Plan: obsidian-livesync
 
 > Added: 2026-05-09
+> Updated: 2026-05-11 — approach changed; see "Updated approach" below.
+
+## Updated approach (2026-05-11): direct fetch + CORS
+
+The earlier plan (kept verbatim below for reference) routed all LiveSync
+traffic through `server/api/proxy.js` with a configurable `PROXY_ALLOWED_HOSTS`
+allowlist. After working with the mobile runtime and looking at the actual
+LiveSync architecture, **we are abandoning the proxy approach for LiveSync.**
+
+### Why we rejected the proxy approach
+
+- **Operational burden.** Every user who runs LiveSync needs to maintain an
+  allowlist on the server. For a public/demo deployment, this becomes a
+  vector for abuse (someone could route arbitrary traffic through the host).
+- **CF Workers limits.** The Cloudflare Workers demo (`cf/`) has CPU-time
+  and subrequest limits that would make a busy LiveSync session expensive.
+- **Liability / cost.** A self-hosted obsidian-web would become a paid-egress
+  gateway for whoever uses it — not something the project should ship by default.
+- **Redundancy.** LiveSync clients already speak directly to their CouchDB.
+  Inserting our server between them adds latency, breaks `_changes` long-polling
+  semantics, and provides no value.
+
+### Why direct fetch is the right answer
+
+- **Zero infrastructure.** The browser fetches CouchDB directly. We don't
+  ship any new endpoint and pay no egress cost.
+- **Infinite scale.** Adding users to obsidian-web adds zero load on our
+  CouchDB-related code path — there isn't one.
+- **Already accepted in the LiveSync community.** Desktop and mobile
+  LiveSync both speak directly to CouchDB; obsidian-web doing the same is
+  the conventional architecture.
+
+### Required changes
+
+1. **`App.requestUrl` in `client-mobile/shims/capacitor-shim.js`** — currently
+   returns `{}`. Implement a real `fetch()` wrapper that returns the same shape
+   LiveSync expects (`{ status, text, headers, arrayBuffer }`). Same for
+   `CapacitorHttp.request` when it appears.
+2. **`createHash`** — already fixed on `client-mobile/boot.js` (async path via
+   `crypto.subtle.digest`). LiveSync ships its own `spark-md5` so it doesn't
+   need our MD5 anyway; our shim is only used for sha256.
+3. **`server/api/proxy.js`** — no change. Stays in place for the Obsidian
+   release / asset hosts the desktop bundle reaches out to (`releases.obsidian.md`,
+   `obsidian.md/api/...`). LiveSync traffic will not go through it.
+4. **No `PROXY_ALLOWED_HOSTS` env var.** Cancelled — see Task 1 below
+   ("Superseded by direct fetch approach").
+
+### CouchDB CORS requirement
+
+Direct fetch only works if CouchDB allows requests from the obsidian-web origin.
+Standard LiveSync configuration:
+
+```ini
+# /opt/couchdb/etc/local.ini
+[chttpd]
+enable_cors = true
+
+[cors]
+origins = *
+credentials = true
+methods = GET,PUT,POST,HEAD,DELETE
+headers = accept, authorization, content-type, origin, referer, x-csrf-token
+```
+
+(`origins = *` is the LiveSync default; tighten if you publish a fixed host.)
+
+### CF demo deployment — `SYSTEM_PLUGINS` env var (planned)
+
+The Cloudflare Workers demo (`cf/`) runs vault state in a Durable Object
+that resets every 4 hours. Shipping LiveSync there by default would have it
+sync into a vault that vanishes — meaningless and confusing.
+
+**Plan (documentation only; not implemented yet):** add a `SYSTEM_PLUGINS`
+env var read by `server/system-plugins.js` (and the CF equivalent) that
+acts as an opt-in filter on which directories under `<repo>/plugins/` are
+exposed:
+
+- **Self-hosted Node server (default):**
+  `SYSTEM_PLUGINS=obsidian-web-layout,obsidian-livesync` (or unset → all).
+- **CF demo (`wrangler.toml`):**
+  `SYSTEM_PLUGINS=obsidian-web-layout` (LiveSync excluded; vault is ephemeral).
+
+When `SYSTEM_PLUGINS` is set, `init()` only loads ids that appear in the list.
+When unset, behavior is unchanged (every directory under `plugins/` is a
+system plugin). Implementation lives in `server/system-plugins.js`; the env
+read should be in `server/config.js` for consistency with other settings.
+
+### Direct-fetch implementation checklist
+
+- [ ] `capacitor-shim.js`: replace `App.requestUrl: () => Promise.resolve({})` with a real fetch wrapper.
+- [ ] Self-test with `app.requestUrl({ url: 'https://example.com', method: 'GET' })` from DevTools.
+- [ ] Install LiveSync into `test-vault/.obsidian/plugins/obsidian-livesync/` (manual; will graduate to system plugin once stable).
+- [ ] Verify initial replication with a small CouchDB on Fly.io or local.
+- [ ] Document CORS config in `docs/livesync.md` when the integration ships.
+
+---
+
+## Superseded — kept for reference (original 2026-05-09 plan)
+
+> The text below was the original integration plan. It is superseded by the
+> direct-fetch approach above. Specifically: **Tasks 1, 3, and 4 do not apply.**
+> Tasks 2 (`createHash`) was implemented in `client/boot.js` and mirrored to
+> `client-mobile/boot.js` on 2026-05-11. Tasks 5 and 6 still apply (they're
+> the manual E2E test and documentation).
 
 ### Background
 
@@ -219,7 +353,16 @@ WASM-based MD5/SHA implementation).
 
 ### Implementation tasks
 
-#### Task 1 — Configurable proxy allowlist (server)
+#### Task 1 — Configurable proxy allowlist (server) — SUPERSEDED
+
+> **Superseded by direct fetch approach (2026-05-11).** Do not implement.
+> The `PROXY_ALLOWED_HOSTS` env var is no longer planned. The proxy stays
+> in place only for Obsidian release/asset hosts that the desktop bundle
+> reaches out to; LiveSync traffic goes directly from the browser to CouchDB.
+> See the "Updated approach (2026-05-11)" section above and Gap 13 in
+> `docs/documentation-gaps.md`.
+>
+> Original plan below for historical context.
 
 File: `server/config.js`
 ```js

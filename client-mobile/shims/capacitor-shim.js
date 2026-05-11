@@ -1,20 +1,51 @@
 /**
- * Capacitor shim for obsidian-web-mobile.
+ * Capacitor shim for the obsidian-web mobile runtime (`/mobile`).
  *
- * native-bridge.js runs first and sets up window.Capacitor with the real
- * Android bridge plumbing.  We then replace the key entry points so that
- * all plugin calls are served by our HTTP API instead of a native process.
+ * Loaded before `native-bridge.js` and `obsidian-mobile/app.js`. Installs an
+ * `androidBridge.postMessage` transport up front, then (after native-bridge
+ * has constructed `window.Capacitor`) replaces the key entry points so that
+ * all Capacitor plugin calls are served by our HTTP API + WebSocket instead
+ * of a native Android process.
  *
- * Design:
- *   - Override Capacitor.nativePromise  — single entry point for all plugin calls
- *   - Override Capacitor.getPlatform    — return 'android' so Em = true
- *   - Override Capacitor.isNativePlatform — return true
- *   - Implement Filesystem plugin        — maps to /api/fs/* HTTP endpoints
- *   - Implement Watch via WebSocket      — maps to /api/watch
- *   - Stub non-critical plugins          — Device, Clipboard, SplashScreen, etc.
+ * THE CRITICAL DETAIL — PluginHeaders:
+ *   `Capacitor.Plugins.<Name>` is a Proxy that consults `c.PluginHeaders`
+ *   to find each method. WITHOUT a matching header entry, every call throws
+ *   "<plugin> is not implemented on android" — long before our nativePromise
+ *   is ever invoked. We therefore declare PluginHeaders for every plugin +
+ *   method below. See `docs/investigations.md` → "PluginHeaders mechanism".
+ *
+ * PLUGIN INVENTORY (13 plugins shipped in obsidian-mobile 1.12.7 APK):
+ *
+ *   Real implementations (route to HTTP API):
+ *     Filesystem  — readFile, writeFile, appendFile, stat, readdir, mkdir,
+ *                   rmdir, rename, copy, deleteFile, trash, getUri,
+ *                   startWatch, stopWatch, watchAndStatAll, addListener
+ *                   (FS over /api/fs/*, watch over /api/watch WebSocket)
+ *
+ *   Browser-native (delegate to Web APIs):
+ *     Clipboard      — navigator.clipboard.{readText,writeText}
+ *     Browser        — window.open(url, '_blank', 'noopener')
+ *     Preferences    — localStorage with `cap:` prefix
+ *     SecureStorage  — localStorage with `sec:` prefix (NOT encrypted!)
+ *
+ *   Identity stubs (return realistic info):
+ *     Device  — getInfo returns { platform:'android', osVersion:'12', ... }
+ *     App     — getInfo returns { name:'Obsidian', version:'1.12.7', ... }
+ *
+ *   Noop stubs (return success, do nothing — irrelevant on web):
+ *     SplashScreen, StatusBar, Keyboard, KeepAwake, Haptics, RateApp
+ *
+ *   TODO / known limitations:
+ *     App.requestUrl — currently returns {}. Needs a real fetch() impl
+ *                      for LiveSync support (depends on target CORS).
+ *                      See PLAN.md → "Updated approach (2026-05-11): direct
+ *                      fetch + CORS".
  *
  * Vault path: read from localStorage / URL params (same mechanism as desktop).
  * All FS calls get ?vault=<id> query param so the server routes to the right vault.
+ *
+ * Call flow is documented inline below at the "Android bridge" comment block
+ * (~line 488). See also docs/investigations.md → "Capacitor plugin inventory".
  */
 (function () {
   'use strict';

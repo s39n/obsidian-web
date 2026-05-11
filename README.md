@@ -80,6 +80,27 @@ node scripts/update-obsidian.js --no-cache
 
 The updater uses the official `obsidian-<version>.asar.gz` release asset, verifies the SHA-256 digest when GitHub provides one, extracts it locally, validates required renderer files, then replaces `obsidian/`.
 
+### Mobile bundle (`obsidian-mobile/`)
+
+The project ships **two runtimes** — a desktop one at `/` and a mobile one at `/mobile`. The mobile runtime needs the Obsidian Android APK bundle, extracted into `obsidian-mobile/`. Like `obsidian/`, this directory is gitignored and downloaded on demand:
+
+```bash
+# extract obsidian-mobile/ from the latest Android APK release
+node scripts/update-obsidian-mobile.js
+
+# specific version
+node scripts/update-obsidian-mobile.js --version 1.12.7
+```
+
+This script downloads the official APK, unpacks the `assets/public/` tree to `obsidian-mobile/`, and **applies three build-time patches** to `obsidian-mobile/app.js` (via `scripts/patch-obsidian-mobile.js`) that expose `window.__owPlatform` and merge `window.__owPlatformOverrides` so the layout switcher plugin works. If a patch fails to match, the script aborts loudly — that's our signal that the Obsidian minifier changed.
+
+Both runtimes share the same server. Run **both updater scripts** if you want `/` and `/mobile` to work. If you only want one of them, you can run just the corresponding script.
+
+| Runtime URL | Updater | Notes |
+|---|---|---|
+| `/` (desktop) | `node scripts/update-obsidian.js` | Required for legacy fallback |
+| `/mobile` | `node scripts/update-obsidian-mobile.js` | **Preferred runtime.** Applies patches automatically. |
+
 ## Configuration
 
 Server environment variables:
