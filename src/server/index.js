@@ -2,8 +2,9 @@
  * Obsidian Web - HTTP/WebSocket server.
  *
  * Serves three things:
- *   1. The custom client/ files (boot.js, shims, custom index.html).
- *   2. Obsidian's untouched renderer files from obsidian/.
+ *   1. The custom src/client/ + src/client-mobile/ files (boot.js, shims, HTML).
+ *   2. Obsidian's untouched renderer files from vendor/obsidian/ and
+ *      vendor/obsidian-mobile/.
  *   3. A file system API at /api/fs/* and a watcher at /api/watch.
  */
 
@@ -79,20 +80,20 @@ function createApp(appConfig = config) {
 
   // Mobile client entry point.
   app.get('/mobile', (req, res) => {
-    sendHtmlWithCacheBust(res, path.join(appConfig.projectRoot, 'client-mobile', 'index.html'));
+    sendHtmlWithCacheBust(res, path.join(appConfig.clientMobilePath, 'index.html'));
   });
 
   // Static files - order matters: client/ first, then obsidian/.
   app.use('/client', express.static(appConfig.clientPath, {
     setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
   }));
-  app.use('/client-mobile', express.static(path.join(appConfig.projectRoot, 'client-mobile'), {
+  app.use('/client-mobile', express.static(appConfig.clientMobilePath, {
     setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
   }));
   app.use('/obsidian', express.static(appConfig.obsidianPath, {
     setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
   }));
-  app.use('/obsidian-mobile', express.static(path.join(appConfig.projectRoot, 'obsidian-mobile'), {
+  app.use('/obsidian-mobile', express.static(appConfig.obsidianMobilePath, {
     setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
   }));
 

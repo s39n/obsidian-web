@@ -1,13 +1,14 @@
 const path = require('path');
 
-const PROJECT_ROOT = path.resolve(__dirname, '..');
+// Repo root — two levels up from src/server/.
+const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 
 // Single source of truth for the Obsidian app version we ship.
 // Both bootstrap.js and electron.js import this instead of hardcoding it.
 const APP_VERSION = '1.12.7';
 
 // Virtual path that the renderer sees as its vault root.
-// Must match the value the client shims use (client/boot.js VAULT_BASE).
+// Must match the value the client shims use (src/client/boot.js VAULT_BASE).
 const VAULT_BASE = '/vault';
 
 const crypto = require('crypto');
@@ -24,8 +25,8 @@ function parsePort(raw) {
 
 /**
  * Compute a short cache-buster string from the mtimes of all files under
- * the client/ directory. Changes to any client file automatically produce
- * a new bust value without any manual ?v= bump.
+ * the src/client/ (or src/client-mobile/) directory. Changes to any client
+ * file automatically produce a new bust value without any manual ?v= bump.
  *
  * Returns a 6-char hex string, e.g. "a3f7c2".
  */
@@ -55,21 +56,24 @@ function computeClientCacheBust(clientPath) {
   }
 }
 
-const CLIENT_PATH = path.resolve(PROJECT_ROOT, 'client');
-const CLIENT_MOBILE_PATH = path.resolve(PROJECT_ROOT, 'client-mobile');
+const CLIENT_PATH = path.resolve(PROJECT_ROOT, 'src', 'client');
+const CLIENT_MOBILE_PATH = path.resolve(PROJECT_ROOT, 'src', 'client-mobile');
+const OBSIDIAN_PATH = path.resolve(PROJECT_ROOT, 'vendor', 'obsidian');
+const OBSIDIAN_MOBILE_PATH = path.resolve(PROJECT_ROOT, 'vendor', 'obsidian-mobile');
 
 module.exports = {
   port: parsePort(process.env.PORT),
   host: process.env.HOST || '127.0.0.1',
-  vaultPath: path.resolve(PROJECT_ROOT, process.env.VAULT_PATH || 'test-vault'),
-  registryPath: path.resolve(PROJECT_ROOT, process.env.VAULT_REGISTRY || 'data/vaults.json'),
-  obsidianPath: path.resolve(PROJECT_ROOT, 'obsidian'),
+  vaultPath: path.resolve(PROJECT_ROOT, process.env.VAULT_PATH || 'user-data/demo-vault'),
+  registryPath: path.resolve(PROJECT_ROOT, process.env.VAULT_REGISTRY || 'user-data/registry.json'),
+  obsidianPath: OBSIDIAN_PATH,
+  obsidianMobilePath: OBSIDIAN_MOBILE_PATH,
   clientPath: CLIENT_PATH,
   clientMobilePath: CLIENT_MOBILE_PATH,
   projectRoot: PROJECT_ROOT,
   appVersion: APP_VERSION,
   vaultBase: VAULT_BASE,
-  // Computed once at startup from client/ + client-mobile/ file mtimes.
+  // Computed once at startup from src/client/ + src/client-mobile/ file mtimes.
   // Used by index.html, starter.html and client-mobile/index.html to inject
   // ?v=<bust> on all client scripts — no manual ?v=N bump needed.
   clientCacheBust: computeClientCacheBust(CLIENT_PATH) + computeClientCacheBust(CLIENT_MOBILE_PATH),

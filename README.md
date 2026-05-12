@@ -24,11 +24,36 @@ The browser version can load faster than the desktop app. Instead of Obsidian re
 
 | | **Node.js server** | **Cloudflare Workers** |
 |---|---|---|
-| Path | `server/` | `cf/` |
+| Path | `src/server/` | `src/deployments/cloudflare/` |
 | Storage | Real filesystem | Durable Object (in-memory) |
 | Persistence | Full | R2 (optional) or reset every N hours |
 | Use case | Personal use, self-hosted | Public demo, zero-maintenance |
 | URL | `http://localhost:3000` | [obsidian-web.tzlev.ovh](https://obsidian-web.tzlev.ovh) |
+
+## Repo layout
+
+```
+src/                         our source code
+├── client/                  desktop runtime (loaded at /)
+├── client-mobile/           mobile runtime (loaded at /mobile)
+├── server/                  Node.js HTTP/WS backend
+├── plugins/                 system plugin overlay (e.g. obsidian-web-layout)
+└── deployments/             provider-specific deployments
+    └── cloudflare/          Cloudflare Workers + Durable Object
+
+vendor/                      extracted Obsidian bundles (gitignored)
+├── obsidian/                desktop renderer
+├── obsidian-mobile/         mobile renderer (with build-time patches)
+└── Obsidian.AppImage        source binary
+
+user-data/                   user-facing data
+├── demo-vault/              example vault (tracked)
+└── registry.json            recent-vaults registry (gitignored, runtime)
+
+.tmp/                        intermediate / build artifacts (folder tracked,
+                             contents gitignored via internal .gitignore)
+scripts/                     build tooling (update-obsidian, patch-obsidian-mobile)
+```
 
 ---
 
@@ -43,7 +68,7 @@ node scripts/update-obsidian.js
 Install and run the backend:
 
 ```bash
-cd server
+cd src/server
 npm install
 npm run dev   # auto-reloads on file changes (uses node --watch)
 ```
@@ -60,7 +85,7 @@ server folder path as a vault.
 
 ## Obsidian Version
 
-`obsidian/` is generated from the official `obsidianmd/obsidian-releases` GitHub releases and is intentionally ignored by Git.
+`vendor/obsidian/` is generated from the official `obsidianmd/obsidian-releases` GitHub releases and is intentionally ignored by Git.
 
 Useful commands:
 
@@ -80,19 +105,19 @@ node scripts/update-obsidian.js --no-cache
 
 The updater uses the official `obsidian-<version>.asar.gz` release asset, verifies the SHA-256 digest when GitHub provides one, extracts it locally, validates required renderer files, then replaces `obsidian/`.
 
-### Mobile bundle (`obsidian-mobile/`)
+### Mobile bundle (`vendor/obsidian-mobile/`)
 
-The project ships **two runtimes** — a desktop one at `/` and a mobile one at `/mobile`. The mobile runtime needs the Obsidian Android APK bundle, extracted into `obsidian-mobile/`. Like `obsidian/`, this directory is gitignored and downloaded on demand:
+The project ships **two runtimes** — a desktop one at `/` and a mobile one at `/mobile`. The mobile runtime needs the Obsidian Android APK bundle, extracted into `vendor/obsidian-mobile/`. Like `vendor/obsidian/`, this directory is gitignored and downloaded on demand:
 
 ```bash
-# extract obsidian-mobile/ from the latest Android APK release
+# extract vendor/obsidian-mobile/ from the latest Android APK release
 node scripts/update-obsidian-mobile.js
 
 # specific version
 node scripts/update-obsidian-mobile.js --version 1.12.7
 ```
 
-This script downloads the official APK, unpacks the `assets/public/` tree to `obsidian-mobile/`, and **applies three build-time patches** to `obsidian-mobile/app.js` (via `scripts/patch-obsidian-mobile.js`) that expose `window.__owPlatform` and merge `window.__owPlatformOverrides` so the layout switcher plugin works. If a patch fails to match, the script aborts loudly — that's our signal that the Obsidian minifier changed.
+This script downloads the official APK, unpacks the `assets/public/` tree to `vendor/obsidian-mobile/`, and **applies four build-time patches** to `vendor/obsidian-mobile/app.js` (via `scripts/patch-obsidian-mobile.js`) that expose `window.__owPlatform`, merge `window.__owPlatformOverrides`, and surface the desktop-layout vault profile panel. If a patch fails to match, the script aborts loudly — that's our signal that the Obsidian minifier changed.
 
 Both runtimes share the same server. Run **both updater scripts** if you want `/` and `/mobile` to work. If you only want one of them, you can run just the corresponding script.
 
@@ -107,17 +132,17 @@ Server environment variables:
 
 - `PORT`: HTTP port, default `3000`.
 - `HOST`: bind address, default `127.0.0.1`.
-- `VAULT_PATH`: vault path relative to the project root or absolute, default `test-vault`.
-- `VAULT_REGISTRY`: recent-vault registry JSON path, default `data/vaults.json`.
+- `VAULT_PATH`: vault path relative to the project root or absolute, default `user-data/demo-vault`.
+- `VAULT_REGISTRY`: recent-vault registry JSON path, default `user-data/registry.json`.
 
 ## Deployment
 
-## Cloudflare Workers demo (`cf/`)
+## Cloudflare Workers demo (`src/deployments/cloudflare/`)
 
 A standalone deployment that runs entirely on Cloudflare's edge — no server to maintain.
 
 ```bash
-cd cf
+cd src/deployments/cloudflare
 npm install
 npm run deploy
 ```
@@ -160,30 +185,29 @@ Environment variables in `wrangler.toml`:
 
 | File | Purpose |
 |------|---------|
-| `cf/src/index.js` | Worker entry: routes `/api/*` to DO, else to CDN |
-| `cf/src/vault-do.js` | Durable Object: vault state, WebSocket, alarm reset |
-| `cf/src/template.js` | Demo vault content (loaded on cold start / reset) |
-| `cf/src/api/bootstrap.js` | Single-shot preload: electron IPC + fs + dirs |
-| `cf/src/api/fs.js` | REST file system (stat, read, write, readdir, etc.) |
-| `cf/src/api/electron.js` | IPC channel stubs |
-| `cf/public/client/boot.js` | Installs `window.require`, fetches bootstrap, injects scripts |
-| `cf/public/client/shims/*` | Browser shims for Node/Electron modules |
+| `src/deployments/cloudflare/index.js` | Worker entry: routes `/api/*` to DO, else to CDN |
+| `src/deployments/cloudflare/vault-do.js` | Durable Object: vault state, WebSocket, alarm reset |
+| `src/deployments/cloudflare/template.js` | Demo vault content (loaded on cold start / reset) |
+| `src/deployments/cloudflare/api/bootstrap.js` | Single-shot preload: electron IPC + fs + dirs |
+| `src/deployments/cloudflare/api/fs.js` | REST file system (stat, read, write, readdir, etc.) |
+| `src/deployments/cloudflare/api/electron.js` | IPC channel stubs |
+| `.tmp/deployments/cloudflare/public/...` | Built static assets (generated by `npm run build`) |
 
 ---
 
 ## Node.js deployment
 
-The Node.js server (`server/`) can be deployed to any Linux box. A typical setup:
+The Node.js server (`src/server/`) can be deployed to any Linux box. A typical setup:
 
 1. Clone the repo and run `node scripts/update-obsidian.js` to get Obsidian's renderer files
-2. `cd server && npm install && npm start`
+2. `cd src/server && npm install && npm start`
 3. Put it behind a reverse proxy (nginx, Caddy, Cloudflare Tunnel) with HTTPS
 4. Do not expose the server directly to the internet without auth — there is no application-level authentication
 
 ## Notes
 
-- Obsidian's extracted files are treated as third-party artifacts. Do not edit files under `obsidian/`; update wrappers/shims instead.
-- The default test vault is `test-vault/`.
+- Obsidian's extracted files are treated as third-party artifacts. Do not edit files under `vendor/obsidian/` or `vendor/obsidian-mobile/`; update wrappers/shims instead.
+- The default vault is `user-data/demo-vault/`.
 - The current starter folder picker is prompt-based: enter an absolute server path.
 - Do not bind the server to a public IP without a tunnel or auth layer in front.
 - Current architecture and roadmap are in `PLAN.md`.
@@ -192,7 +216,7 @@ The Node.js server (`server/`) can be deployed to any Linux box. A typical setup
 
 This is an **educational proof-of-concept** exploring how Electron-based apps can run in a standard browser. It is not affiliated with, endorsed by, or associated with [Obsidian](https://obsidian.md) or Dynalist Inc.
 
-This repository does **not** include Obsidian's source code. The `obsidian/` directory is gitignored — users must download Obsidian's renderer themselves using the provided setup script. Obsidian's code remains the property of Dynalist Inc. under their [Terms of Service](https://obsidian.md/terms).
+This repository does **not** include Obsidian's source code. The `vendor/obsidian/` and `vendor/obsidian-mobile/` directories are gitignored — users must download Obsidian's renderer themselves using the provided setup scripts. Obsidian's code remains the property of Dynalist Inc. under their [Terms of Service](https://obsidian.md/terms).
 
 If the Obsidian team has any concerns about this project, please [open an issue](https://github.com/MusiCode1/obsidian-web/issues) and we will address them promptly.
 

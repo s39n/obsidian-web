@@ -8,45 +8,50 @@ untouched so we can swap in newer versions without forking.
 
 ```
 Browser
-├── client/ (our code)
+├── src/client/ (our code, /)
 │   ├── index.html  - custom loader, defines script order
 │   ├── boot.js     - installs window.require + globals
 │   └── shims/      - one file per Node/Electron module we replace
-└── obsidian/  (extracted from AppImage, never modified)
-    ├── app.js
-    ├── enhance.js / i18n.js / app.css / lib/* / public/*
-    └── (starter.js / starter.html unused - replaced by our boot)
+├── src/client-mobile/ (our code, /mobile)
+│   ├── index.html
+│   ├── boot.js
+│   └── shims/capacitor-shim.js  - 13 Capacitor plugins routed to /api/*
+└── vendor/ (extracted from Obsidian, never modified; gitignored)
+    ├── obsidian/          (desktop bundle)
+    └── obsidian-mobile/   (mobile bundle, build-time patched)
 
-Server (server/)
+Server (src/server/)
 ├── index.js              - Express + WebSocket
-├── vault-registry.js     - persistent recent-vault registry (data/vaults.json)
+├── vault-registry.js     - persistent recent-vault registry (user-data/registry.json)
+├── system-plugins.js     - overlay from src/plugins/ into vault's .obsidian/plugins/
 ├── api/bootstrap.js      - single-shot preload: electron IPC + .obsidian/ + dirs cache
 ├── api/fs.js             - REST file system over HTTP (scoped per vault id)
 ├── api/electron.js       - stubs for ipcRenderer.sendSync channels
 ├── api/vaults.js         - vault list/open/remove/move API
+├── api/proxy.js          - outbound HTTP proxy (Obsidian release/asset hosts)
 └── api/watch.js          - chokidar -> WebSocket for fs.watch (per vault)
 
 Vault
 └── plain Markdown files (the user's actual content)
 ```
 
-### Two parallel client runtimes — `client/` vs `client-mobile/`
+### Two parallel client runtimes — `src/client/` vs `src/client-mobile/`
 
-The same Node.js server (`server/`) hosts two completely separate browser
+The same Node.js server (`src/server/`) hosts two completely separate browser
 runtimes that share its API:
 
 | Route | Bundle loaded | Adapter chosen | Shim layer | Use case |
 |---|---|---|---|---|
-| `/` | `obsidian/app.js` (desktop) | `FileSystemAdapter` via `original-fs` shim | `client/shims/*` (electron, original-fs, ipcRenderer, …) | Legacy fallback; desktop-class plugin compatibility (full Node API surface). |
-| `/mobile` | `obsidian-mobile/app.js` (Android APK bundle) | `CapacitorAdapter` via `capacitor-shim.js` | `client-mobile/shims/capacitor-shim.js` + minimal node shims (path, url, os, crypto, …) | Preferred runtime. Uses Obsidian's mobile codepaths (no sync XHR, no Electron assumptions). Layout (mobile/desktop UI) chosen at boot via `__owPlatformOverrides`. |
+| `/` | `vendor/obsidian/app.js` (desktop) | `FileSystemAdapter` via `original-fs` shim | `src/client/shims/*` (electron, original-fs, ipcRenderer, …) | Legacy fallback; desktop-class plugin compatibility (full Node API surface). |
+| `/mobile` | `vendor/obsidian-mobile/app.js` (Android APK bundle) | `CapacitorAdapter` via `capacitor-shim.js` | `src/client-mobile/shims/capacitor-shim.js` + minimal node shims (path, url, os, crypto, …) | Preferred runtime. Uses Obsidian's mobile codepaths (no sync XHR, no Electron assumptions). Layout (mobile/desktop UI) chosen at boot via `__owPlatformOverrides`. |
 
 ```
-                  ┌── /         → client/index.html        → desktop bundle + electron shims
+                  ┌── /         → src/client/index.html        → desktop bundle + electron shims
 Browser → server ─┤
-                  └── /mobile   → client-mobile/index.html → mobile bundle + Capacitor shim
+                  └── /mobile   → src/client-mobile/index.html → mobile bundle + Capacitor shim
                         │
                         ├── share /api/*  (fs, watch, bootstrap, vaults, electron)
-                        └── share obsidian/* and obsidian-mobile/* static assets
+                        └── share vendor/obsidian/* and vendor/obsidian-mobile/* static assets
 ```
 
 **Default recommendation:** `/mobile`. It's lighter (3.6 MB bundle vs 7+ MB),
@@ -504,27 +509,35 @@ Add a `docs/livesync.md` guide covering:
 
 | File | Purpose |
 |------|---------|
-| `server/index.js` | HTTP/WS entry point; triggers bootstrap warm-up on listen |
-| `server/config.js` | port, host, vault path, obsidian path |
-| `server/vault-registry.js` | persistent recent-vault registry |
-| `server/api/bootstrap.js` | single-shot preload endpoint; server-side mtime cache; pre-compression |
-| `server/api/vaults.js` | vault list/open/remove/move API |
-| `server/api/fs.js` | REST file ops (scoped per vault id) |
-| `server/api/electron.js` | sendSync channel handlers |
-| `server/api/watch.js` | chokidar bridge (per-connection vault watcher) |
-| `client/index.html` | script load order |
-| `client/starter.html` | wrapped Obsidian starter entry |
-| `client/boot.js` | window.require, modules table, platform globals |
-| `client/shims/sync-http.js` | sync XMLHttpRequest helpers |
-| `client/shims/original-fs.js` | fs over HTTP |
-| `client/shims/electron.js` | ipcRenderer + remote stubs |
-| `client/shims/path.js` | POSIX path utilities |
-| `client/shims/url.js` | pathToFileURL, fileURLToPath |
-| `client/shims/os.js` | tmpdir, hostname, etc. |
-| `client/shims/btime.js` | birthtime stub (no-op) |
-| `obsidian/` | extracted desktop bundle, untouched |
-| `obsidian-mobile/` | extracted mobile bundle, patched at build time (Platform overrides) |
-| `client-mobile/` | mobile-runtime client (boot.js + capacitor shim + index.html for `/mobile`) |
+| `src/server/index.js` | HTTP/WS entry point; triggers bootstrap warm-up on listen |
+| `src/server/config.js` | port, host, vault path, obsidian path |
+| `src/server/vault-registry.js` | persistent recent-vault registry |
+| `src/server/system-plugins.js` | overlay from `src/plugins/` into vault's `.obsidian/plugins/` |
+| `src/server/api/bootstrap.js` | single-shot preload endpoint; server-side mtime cache; pre-compression |
+| `src/server/api/vaults.js` | vault list/open/remove/move API |
+| `src/server/api/fs.js` | REST file ops (scoped per vault id) |
+| `src/server/api/electron.js` | sendSync channel handlers |
+| `src/server/api/proxy.js` | outbound HTTP proxy for Obsidian release/asset hosts |
+| `src/server/api/watch.js` | chokidar bridge (per-connection vault watcher) |
+| `src/client/index.html` | script load order |
+| `src/client/starter.html` | wrapped Obsidian starter entry |
+| `src/client/boot.js` | window.require, modules table, platform globals |
+| `src/client/shims/sync-http.js` | sync XMLHttpRequest helpers |
+| `src/client/shims/original-fs.js` | fs over HTTP |
+| `src/client/shims/electron.js` | ipcRenderer + remote stubs |
+| `src/client/shims/path.js` | POSIX path utilities |
+| `src/client/shims/url.js` | pathToFileURL, fileURLToPath |
+| `src/client/shims/os.js` | tmpdir, hostname, etc. |
+| `src/client/shims/btime.js` | birthtime stub (no-op) |
+| `src/client-mobile/` | mobile-runtime client (boot.js + capacitor shim + index.html for `/mobile`) |
+| `src/plugins/obsidian-web-layout/` | system-plugin: ribbon + commands to switch mobile/desktop layout |
+| `src/deployments/cloudflare/` | Cloudflare Workers deployment (Worker + Durable Object + build script) |
+| `vendor/obsidian/` | extracted desktop bundle, untouched |
+| `vendor/obsidian-mobile/` | extracted mobile bundle, patched at build time (4 patches) |
+| `user-data/demo-vault/` | example vault shipped with the repo |
+| `user-data/registry.json` | recent-vaults registry (gitignored, runtime) |
+| `.tmp/` | build artifacts + intermediate (folder tracked, contents gitignored) |
+| `scripts/update-obsidian.js` | downloads asar, extracts desktop bundle to `vendor/obsidian/` |
 | `scripts/update-obsidian-mobile.js` | downloads APK, extracts mobile bundle, applies patches |
-| `scripts/patch-obsidian-mobile.js` | 3 regex patches exposing `__owPlatform` + `__owPlatformOverrides` |
+| `scripts/patch-obsidian-mobile.js` | 4 regex patches exposing `__owPlatform`, `__owPlatformOverrides`, and the desktop vault-profile panel |
 | `test-vault/` | scratch vault for development |

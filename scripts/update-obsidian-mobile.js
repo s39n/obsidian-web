@@ -28,8 +28,8 @@ const { spawnSync } = require('child_process');
 const { applyPatches } = require('./patch-obsidian-mobile');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
-const CACHE_DIR    = path.join(PROJECT_ROOT, '.cache', 'obsidian-releases');
-const TARGET_DIR   = path.join(PROJECT_ROOT, 'obsidian-mobile');
+const CACHE_DIR    = path.join(PROJECT_ROOT, '.tmp', 'cache', 'obsidian-releases');
+const TARGET_DIR   = path.join(PROJECT_ROOT, 'vendor', 'obsidian-mobile');
 const GITHUB_API   = 'https://api.github.com/repos/obsidianmd/obsidian-releases/releases';
 const USER_AGENT   = 'obsidian-web-updater';
 

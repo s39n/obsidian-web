@@ -10,8 +10,9 @@ const { pipeline } = require('stream/promises');
 const zlib = require('zlib');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
-const CACHE_DIR = path.join(PROJECT_ROOT, '.cache', 'obsidian-releases');
-const TARGET_DIR = path.join(PROJECT_ROOT, 'obsidian');
+const CACHE_DIR = path.join(PROJECT_ROOT, '.tmp', 'cache', 'obsidian-releases');
+const TARGET_DIR = path.join(PROJECT_ROOT, 'vendor', 'obsidian');
+const EXTRACT_WORKDIR = path.join(PROJECT_ROOT, '.tmp', 'obsidian-extract');
 const GITHUB_RELEASES_API = 'https://api.github.com/repos/obsidianmd/obsidian-releases/releases';
 const USER_AGENT = 'obsidian-web-updater';
 
@@ -331,7 +332,8 @@ async function main() {
   const version = (release.tag_name || asset.name).replace(/^v/, '');
   const gzPath = path.join(CACHE_DIR, asset.name);
   const asarPath = path.join(CACHE_DIR, asset.name.replace(/\.gz$/i, ''));
-  const tmpExtractDir = path.join(PROJECT_ROOT, `obsidian.tmp-${Date.now()}`);
+  await fsp.mkdir(EXTRACT_WORKDIR, { recursive: true });
+  const tmpExtractDir = path.join(EXTRACT_WORKDIR, `obsidian.tmp-${Date.now()}`);
 
   console.log(`Obsidian release: ${release.name || version} (${release.tag_name || 'latest'})`);
   console.log(`Selected asset: ${asset.name}`);
