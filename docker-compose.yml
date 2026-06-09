@@ -21,11 +21,6 @@ services:
       # AUTH_KEY: "change-me"
     restart: unless-stopped
 
-volumes:
-  # Named volume so the downloaded Obsidian bundles survive container rebuilds.
-  # Delete with `docker volume rm obsidian_vendor` to force a fresh download.
-  obsidian_vendor:
-
   # ── Auth Option 2: HTTP Basic Auth via nginx ────────────────────────────────
   # Puts nginx in front of the app with username/password protection.
   # Also handles WebSocket upgrade for real-time vault sync (/api/watch).
@@ -49,3 +44,8 @@ volumes:
     depends_on:
       - obsidian-web
     restart: unless-stopped
+
+volumes:
+  # Named volume so the downloaded Obsidian bundles survive container rebuilds.
+  # Delete with `docker volume rm obsidian_vendor` to force a fresh download.
+  obsidian_vendor:
