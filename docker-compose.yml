@@ -4,7 +4,7 @@ services:
     ports:
       - "${PORT:-3000}:3000"
     volumes:
-      # Vault and registry persist on the host — safe across rebuilds
+      # Vault and registry persist on the host — safe across container rebuilds
       - ./user-data:/app/user-data
     environment:
       HOST: "0.0.0.0"
@@ -12,12 +12,33 @@ services:
       VAULT_PATH: "user-data/demo-vault"
       # VAULT_REGISTRY: "user-data/registry.json"
       # WATCH_POLLING: "true"   # enable for NFS / SMB / FUSE-mounted vaults
+
+      # ── Auth Option 1: API Key ─────────────────────────────────────────────
+      # Uncomment and set AUTH_KEY to enable a login page + cookie session.
+      # In Dockhand you can set this in the stack's environment editor instead.
+      # AUTH_KEY: "change-me"
     restart: unless-stopped
 
-# ── Auth options ───────────────────────────────────────────────────────────────
-# Option 1 — API Key (built into the server, no extra container):
-#   docker compose -f docker-compose.yml -f docker-compose.auth-key.yml up
-#
-# Option 2 — HTTP Basic Auth via nginx (requires nginx.htpasswd):
-#   htpasswd -c nginx.htpasswd <username>
-#   docker compose -f docker-compose.yml -f docker-compose.auth-basic.yml up
+  # ── Auth Option 2: HTTP Basic Auth via nginx ────────────────────────────────
+  # Puts nginx in front of the app with username/password protection.
+  # Also handles WebSocket upgrade for real-time vault sync (/api/watch).
+  #
+  # Setup (run once on the host):
+  #   htpasswd -c nginx.htpasswd <username>
+  #
+  # To start with this option:
+  #   docker compose --profile auth-nginx up
+  #
+  # When using this profile, comment out the `ports` on obsidian-web above
+  # so the app is only reachable through nginx, not directly.
+  nginx:
+    profiles: ["auth-nginx"]
+    image: nginx:alpine
+    ports:
+      - "${PORT:-3000}:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx.htpasswd:/etc/nginx/htpasswd:ro
+    depends_on:
+      - obsidian-web
+    restart: unless-stopped
