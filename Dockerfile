@@ -2,6 +2,8 @@
 # Both scripts use only Node built-ins (https, zlib, crypto, fs) — no npm install needed.
 FROM node:20-alpine AS obsidian-dl
 WORKDIR /app
+# unzip is required by update-obsidian-mobile.js (extracts assets from the APK)
+RUN apk add --no-cache unzip
 COPY scripts/ scripts/
 RUN node scripts/update-obsidian.js \
  && node scripts/update-obsidian-mobile.js
