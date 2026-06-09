@@ -1,0 +1,15 @@
+# Auth Option 1 — API Key
+# ─────────────────────────────────────────────────────────────────────────────
+# The server checks AUTH_KEY on every request.
+# Unauthenticated browsers get a login page; API calls get a 401.
+#
+# Usage:
+#   AUTH_KEY=your-secret docker compose -f docker-compose.yml -f docker-compose.auth-key.yml up
+#
+# Or set AUTH_KEY in a .env file at the repo root and run:
+#   docker compose -f docker-compose.yml -f docker-compose.auth-key.yml up
+
+services:
+  obsidian-web:
+    environment:
+      AUTH_KEY: "${AUTH_KEY:?AUTH_KEY must be set (e.g. export AUTH_KEY=your-secret)}"

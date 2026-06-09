@@ -1,0 +1,23 @@
+services:
+  obsidian-web:
+    build: .
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      # Vault and registry persist on the host — safe across rebuilds
+      - ./user-data:/app/user-data
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "3000"
+      VAULT_PATH: "user-data/demo-vault"
+      # VAULT_REGISTRY: "user-data/registry.json"
+      # WATCH_POLLING: "true"   # enable for NFS / SMB / FUSE-mounted vaults
+    restart: unless-stopped
+
+# ── Auth options ───────────────────────────────────────────────────────────────
+# Option 1 — API Key (built into the server, no extra container):
+#   docker compose -f docker-compose.yml -f docker-compose.auth-key.yml up
+#
+# Option 2 — HTTP Basic Auth via nginx (requires nginx.htpasswd):
+#   htpasswd -c nginx.htpasswd <username>
+#   docker compose -f docker-compose.yml -f docker-compose.auth-basic.yml up

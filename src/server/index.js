@@ -24,6 +24,7 @@ const { warmUpBootstrapCache } = require('./api/bootstrap');
 const createProxyRouter = require('./api/proxy');
 const attachWatchServer = require('./api/watch');
 const VaultRegistry = require('./vault-registry');
+const { createAuthMiddleware } = require('./middleware/auth');
 
 function createApp(appConfig = config) {
   const app = express();
@@ -33,6 +34,14 @@ function createApp(appConfig = config) {
   // Brotli gives ~84% reduction, gzip ~79%. The middleware auto-selects based
   // on Accept-Encoding: browsers get brotli, curl/other tools get gzip.
   app.use(compression({ level: 6 }));
+
+  // Optional API-key auth — enabled by setting AUTH_KEY env var.
+  // See docker-compose.auth-key.yml for usage.
+  const authMiddleware = createAuthMiddleware();
+  if (authMiddleware) {
+    app.use(authMiddleware);
+    console.log('[auth] API-key authentication enabled');
+  }
 
   // Request logging - very chatty, but invaluable while we are still
   // figuring out what Obsidian asks for during boot.
