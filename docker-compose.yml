@@ -6,6 +6,8 @@ services:
     volumes:
       # Vault and registry persist on the host — safe across container rebuilds
       - ./user-data:/app/user-data
+      # Obsidian renderer bundles — downloaded on first start, cached across restarts
+      - obsidian_vendor:/app/vendor
     environment:
       HOST: "0.0.0.0"
       PORT: "3000"
@@ -18,6 +20,11 @@ services:
       # In Dockhand you can set this in the stack's environment editor instead.
       # AUTH_KEY: "change-me"
     restart: unless-stopped
+
+volumes:
+  # Named volume so the downloaded Obsidian bundles survive container rebuilds.
+  # Delete with `docker volume rm obsidian_vendor` to force a fresh download.
+  obsidian_vendor:
 
   # ── Auth Option 2: HTTP Basic Auth via nginx ────────────────────────────────
   # Puts nginx in front of the app with username/password protection.
