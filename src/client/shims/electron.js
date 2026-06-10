@@ -374,6 +374,32 @@
         _nativeWindowOpen(args[0], '_blank', 'noopener');
         return;
       }
+
+      // 'open-window' / 'move-to-window': Obsidian requests that the current
+      // pane or vault open in a new Electron window. We can't create a full
+      // second Obsidian instance, but we can open a new browser tab pointing
+      // at the same vault so the user at least gets a second view.
+      if (channel === 'open-window' || channel === 'move-to-window' || channel === 'new-window') {
+        const params = new URLSearchParams(location.search);
+        const vaultId = params.get('vault') || (global.__obsidianWeb && global.__obsidianWeb.vaultId);
+        const url = vaultId
+          ? location.origin + '/?vault=' + encodeURIComponent(vaultId)
+          : location.origin + '/';
+        _nativeWindowOpen(url, '_blank', 'noopener');
+        return;
+      }
+
+      // 'open-vault-manager' / 'open-vault-picker': Obsidian wants to show the
+      // vault switcher UI. Open our /starter page in a new tab.
+      if (
+        channel === 'open-vault-manager' ||
+        channel === 'open-vault-picker' ||
+        channel === 'manage-vaults'
+      ) {
+        _nativeWindowOpen(location.origin + '/starter', '_blank', 'noopener');
+        return;
+      }
+
       // Application-menu IPC channels - ignored on web. Obsidian renders
       // its own DOM menus separately; the Electron menu bar isn't visible.
       if (

@@ -133,7 +133,10 @@ function createElectronRouter(vaultRegistry, fallbackVaultRoot) {
 
   // ipcRenderer.sendSync('sandbox') - opens a sandbox vault, ignore.
   router.get('/sandbox', (req, res) => res.json({ value: null }));
-  router.get('/starter', (req, res) => res.json({ value: null }));
+  // ipcRenderer.sendSync('starter') - returns the URL of the vault-picker page.
+  // Obsidian uses this to know where to navigate when the user opens the vault
+  // manager. Returning '/starter' lets it open our vault management page.
+  router.get('/starter', (req, res) => res.json({ value: '/starter' }));
   router.get('/help', (req, res) => res.json({ value: null }));
 
   // Update / insider channels - we are never updating, never insider.
