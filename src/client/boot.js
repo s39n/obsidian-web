@@ -147,6 +147,8 @@ const OBSIDIAN_SCRIPTS = [
           .then(entries => entries.length ? entries[0].password : null)
           .catch(() => null);
       },
+      // Our server-backed store is always available
+      isEncryptionAvailable() { return true; },
     };
   }
 
