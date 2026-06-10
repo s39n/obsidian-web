@@ -81,6 +81,14 @@ function createApp(appConfig = config) {
     }
   }
 
+  // Favicon and app icons from the project root.
+  const rootIconFiles = ['favicon.ico', 'favicon.svg', 'apple-touch-icon.png'];
+  for (const f of rootIconFiles) {
+    app.get('/' + f, (req, res) => {
+      res.sendFile(path.join(appConfig.projectRoot, f));
+    });
+  }
+
   // Custom entry point - our index.html, not Obsidian's.
   app.get('/', (req, res) => {
     sendHtmlWithCacheBust(res, path.join(appConfig.clientPath, 'index.html'));

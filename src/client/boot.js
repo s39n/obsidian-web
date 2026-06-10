@@ -808,16 +808,52 @@ const OBSIDIAN_SCRIPTS = [
           document.head.appendChild(s);
         }
 
-        // Hide the loading overlay once Obsidian's workspace element appears.
+        // Hide the loading overlay once Obsidian's workspace element appears,
+        // then apply post-boot patches that need window.app to be ready.
         var overlay = document.getElementById('ow-loading');
         if (overlay) {
           var obs = new MutationObserver(function () {
             if (document.querySelector('.workspace')) {
               overlay.remove();
               obs.disconnect();
+              _owPatchWorkspace();
             }
           });
           obs.observe(document.body, { childList: true, subtree: true });
+        }
+
+        // Patch workspace methods that rely on Electron-native APIs unavailable
+        // in the browser. Retries briefly in case window.app is not yet set.
+        function _owPatchWorkspace(attempt) {
+          attempt = attempt || 0;
+          if (!window.app || !window.app.workspace) {
+            if (attempt < 10) setTimeout(function () { _owPatchWorkspace(attempt + 1); }, 50);
+            return;
+          }
+          var ws = window.app.workspace;
+
+          // openPopoutLeaf: Obsidian checks for a native Electron BrowserWindow
+          // via an internal validation function (V0) that throws "re-install"
+          // when running in a plain browser. Replace it to open a new browser
+          // tab with the same vault instead.
+          if (typeof ws.openPopoutLeaf === 'function') {
+            ws.openPopoutLeaf = function _owOpenPopoutLeaf() {
+              var params = new URLSearchParams(location.search);
+              var vaultId = params.get('vault') ||
+                (window.__obsidianWeb && window.__obsidianWeb.vaultId);
+              var url = vaultId
+                ? location.origin + '/?vault=' + encodeURIComponent(vaultId)
+                : location.origin + '/';
+              // Use the shell.openExternal shim which holds a pre-Obsidian
+              // reference to window.open (Obsidian patches window.open to
+              // route through its link handler, causing infinite recursion).
+              if (window.__owElectron && window.__owElectron.shell) {
+                window.__owElectron.shell.openExternal(url);
+              } else {
+                window.open(url, '_blank', 'noopener,noreferrer');
+              }
+            };
+          }
         }
       })
       .catch(function (err) {
