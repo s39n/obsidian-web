@@ -78,6 +78,36 @@ if (typeof crypto !== 'undefined' && !crypto.subtle) {
       return out;
     }
 
+    // ── SHA-1 (pure JS, for ion-sync getSHA) ─────────────────────────────
+    function _sha1(data) {
+      var H=new Uint32Array([0x67452301,0xEFCDAB89,0x98BADCFE,0x10325476,0xC3D2E1F0]);
+      var len=data.length,bc=Math.ceil((len+9)/64),p=new Uint8Array(bc*64);
+      p.set(data);p[len]=0x80;
+      var dv=new DataView(p.buffer);
+      dv.setUint32(p.length-4,(len*8)>>>0,false);
+      dv.setUint32(p.length-8,Math.floor(len/0x20000000)>>>0,false);
+      var W=new Uint32Array(80);
+      for(var i=0;i<bc;i++){
+        var bv=new DataView(p.buffer,i*64,64);
+        for(var t=0;t<16;t++)W[t]=bv.getUint32(t*4,false);
+        for(var t=16;t<80;t++){var x=W[t-3]^W[t-8]^W[t-14]^W[t-16];W[t]=(x<<1)|(x>>>31);}
+        var a=H[0],b=H[1],c=H[2],d=H[3],e=H[4];
+        for(var t=0;t<80;t++){
+          var f,k;
+          if(t<20){f=(b&c)|(~b&d);k=0x5A827999;}
+          else if(t<40){f=b^c^d;k=0x6ED9EBA1;}
+          else if(t<60){f=(b&c)|(b&d)|(c&d);k=0x8F1BBCDC;}
+          else{f=b^c^d;k=0xCA62C1D6;}
+          var tmp=(((a<<5)|(a>>>27))+f+e+k+W[t])>>>0;
+          e=d;d=c;c=((b<<30)|(b>>>2))>>>0;b=a;a=tmp;
+        }
+        H[0]=(H[0]+a)>>>0;H[1]=(H[1]+b)>>>0;H[2]=(H[2]+c)>>>0;H[3]=(H[3]+d)>>>0;H[4]=(H[4]+e)>>>0;
+      }
+      var out=new Uint8Array(20),ov=new DataView(out.buffer);
+      for(var i=0;i<5;i++)ov.setUint32(i*4,H[i],false);
+      return out;
+    }
+
     // ── AES-256 forward cipher (pure JS) ──────────────────────────────────
     // S-box (forward)
     var _AS = new Uint8Array([99,124,119,123,242,107,111,197,48,1,103,43,254,215,171,118,202,130,201,125,250,89,71,240,173,212,162,175,156,164,114,192,183,253,147,38,54,63,247,204,52,165,229,241,113,216,49,21,4,199,35,195,24,150,5,154,7,18,128,226,235,39,178,117,9,131,44,26,27,110,90,160,82,59,214,179,41,227,47,132,83,209,0,237,32,252,177,91,106,203,190,57,74,76,88,207,208,239,170,251,67,77,51,133,69,249,2,127,80,60,159,168,81,163,64,143,146,157,56,245,188,182,218,33,16,255,243,210,205,12,19,236,95,151,68,23,196,167,126,61,100,93,25,115,96,129,79,220,34,42,144,136,70,238,184,20,222,94,11,219,224,50,58,10,73,6,36,92,194,211,172,98,145,149,228,121,231,200,55,109,141,213,78,169,108,86,244,234,101,122,174,8,186,120,37,46,28,166,180,198,232,221,116,31,75,189,139,138,112,62,181,102,72,3,246,14,97,53,87,185,134,193,29,158,225,248,152,17,105,217,142,148,155,30,135,233,206,85,40,223,140,161,137,13,191,230,66,104,65,153,45,15,176,84,187,22]);
@@ -192,11 +222,11 @@ if (typeof crypto !== 'undefined' && !crypto.subtle) {
     // ── crypto.subtle ─────────────────────────────────────────────────────
     crypto.subtle = {
 
-      // SHA-256 only
       digest: function (algorithm, data) {
         var name=(typeof algorithm==='string'?algorithm:(algorithm&&algorithm.name)||'')
           .toUpperCase().replace(/-/g,'');
         if (name==='SHA256') return Promise.resolve(_sha256(_toU8(data)).buffer);
+        if (name==='SHA1')   return Promise.resolve(_sha1(_toU8(data)).buffer);
         return Promise.reject(new Error('[polyfill] crypto.subtle.digest: unsupported "'+algorithm+'"'));
       },
 
