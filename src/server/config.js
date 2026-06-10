@@ -62,6 +62,7 @@ const OBSIDIAN_PATH = path.resolve(PROJECT_ROOT, 'vendor', 'obsidian');
 const OBSIDIAN_MOBILE_PATH = path.resolve(PROJECT_ROOT, 'vendor', 'obsidian-mobile');
 
 module.exports = {
+  userDataPath: path.resolve(PROJECT_ROOT, 'user-data'),
   port: parsePort(process.env.PORT),
   host: process.env.HOST || '127.0.0.1',
   vaultPath: path.resolve(PROJECT_ROOT, process.env.VAULT_PATH || 'user-data/demo-vault'),

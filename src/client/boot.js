@@ -110,7 +110,45 @@ const OBSIDIAN_SCRIPTS = [
     // system commands) can load. Commands will fail gracefully at runtime.
     'child_process': makeChildProcessStub(),
     '@electron/remote': window.__owElectron.remote,
+    // keytar: server-backed credential store (replaces OS keychain)
+    'keytar': makeKeytarShim(),
   };
+
+  function makeKeytarShim() {
+    function q(service, account) {
+      return '/api/keytar?service=' + encodeURIComponent(service) + '&account=' + encodeURIComponent(account);
+    }
+    return {
+      getPassword(service, account) {
+        return fetch(q(service, account))
+          .then(r => r.ok ? r.json().then(j => j.password) : null)
+          .catch(() => null);
+      },
+      setPassword(service, account, password) {
+        return fetch('/api/keytar', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ service, account, password }),
+        }).then(() => undefined);
+      },
+      deletePassword(service, account) {
+        return fetch(q(service, account), { method: 'DELETE' })
+          .then(r => r.json()).then(j => !!j.ok)
+          .catch(() => false);
+      },
+      findCredentials(service) {
+        return fetch('/api/keytar/all?service=' + encodeURIComponent(service))
+          .then(r => r.ok ? r.json() : [])
+          .catch(() => []);
+      },
+      findPassword(service) {
+        return fetch('/api/keytar/all?service=' + encodeURIComponent(service))
+          .then(r => r.ok ? r.json() : [])
+          .then(entries => entries.length ? entries[0].password : null)
+          .catch(() => null);
+      },
+    };
+  }
 
   function makeChildProcessStub() {
     const ERR = new Error('[obsidian-web] child_process is not available in web mode');
