@@ -35,12 +35,13 @@ function createApp(appConfig = config) {
   // on Accept-Encoding: browsers get brotli, curl/other tools get gzip.
   app.use(compression({ level: 6 }));
 
-  // Optional API-key auth — enabled by setting AUTH_KEY env var.
-  // See docker-compose.auth-key.yml for usage.
+  // Optional TOTP auth — enabled by setting TOTP_SECRET env var.
+  // Generate a secret: node -e "const {authenticator}=require('otplib');console.log(authenticator.generateSecret())"
+  // Then visit /__totp-setup?token=YOUR_SECRET to scan the QR code.
   const authMiddleware = createAuthMiddleware();
   if (authMiddleware) {
     app.use(authMiddleware);
-    console.log('[auth] API-key authentication enabled');
+    console.log('[auth] TOTP authentication enabled — visit /__totp-setup?token=YOUR_SECRET to configure your authenticator app');
   }
 
   // Request logging - very chatty, but invaluable while we are still

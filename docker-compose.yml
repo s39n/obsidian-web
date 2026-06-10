@@ -28,8 +28,11 @@ services:
       WATCH_POLLING: "${WATCH_POLLING:-false}"
       # VAULT_REGISTRY: "user-data/registry.json"
 
-      # Auth — set AUTH_KEY in Dockhand's env editor or in a .env file
-      AUTH_KEY: "${AUTH_KEY:-}"
+      # Auth — generate a secret with:
+      #   node -e "const {authenticator}=require('otplib');console.log(authenticator.generateSecret())"
+      # Then set TOTP_SECRET in Dockhand's env editor or in a .env file.
+      # Visit /__totp-setup?token=YOUR_SECRET to scan the QR code.
+      TOTP_SECRET: "${TOTP_SECRET:-}"
     env_file:
       - path: .env
         required: false
