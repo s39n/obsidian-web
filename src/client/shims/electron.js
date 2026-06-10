@@ -447,6 +447,19 @@
       fromId: () => null,
       getFocusedWebContents: () => null,
     },
+    // safeStorage: Electron's credential encryption API (used for keychain).
+    // Since our keychain is stored server-side there's no OS-level encryption
+    // to do here — we pass data through as-is (UTF-8 bytes / string).
+    safeStorage: {
+      isEncryptionAvailable() { return true; },
+      encryptString(text) {
+        // Return a Buffer-like Uint8Array of the UTF-8 bytes
+        return new TextEncoder().encode(text);
+      },
+      decryptString(buf) {
+        return new TextDecoder().decode(buf);
+      },
+    },
     nativeTheme: (function () {
       const t = {
         shouldUseDarkColors: window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches,
