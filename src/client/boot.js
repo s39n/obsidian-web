@@ -822,13 +822,6 @@ const OBSIDIAN_SCRIPTS = [
           obs.observe(document.body, { childList: true, subtree: true });
         }
 
-        // Rewrite app:// and file:// asset URLs in img/video/audio/source
-        // elements to HTTP paths our server can serve.
-        // Obsidian constructs these via vault.getResourcePath(), which in
-        // Electron returns app://local/<vaultRoot>/<relPath>. We intercept
-        // them here and redirect to /api/fs/read?path=<relPath>.
-        _owInstallAssetRewriter();
-
         // Converts an app:// or file:// asset URL to an /api/fs/read HTTP URL.
         // app://local/vault/images/photo.png → /api/fs/read?path=images%2Fphoto.png
         // file:///vault/images/photo.png    → /api/fs/read?path=images%2Fphoto.png
@@ -912,6 +905,26 @@ const OBSIDIAN_SCRIPTS = [
             return;
           }
           var ws = window.app.workspace;
+
+          // vault.getResourcePath: Obsidian calls this for every embedded asset
+          // (images, audio, video, PDFs). In Electron it returns app://local/...
+          // which browsers can't load. Override it here — before any note is
+          // rendered — so the URL is already an HTTP path when Obsidian sets
+          // it as <img src>. This is more reliable than the MutationObserver
+          // fallback (which fixes src reactively after the browser already
+          // tried and failed to load the app:// URL).
+          if (window.app.vault && typeof window.app.vault.getResourcePath === 'function') {
+            var _origGetResourcePath = window.app.vault.getResourcePath.bind(window.app.vault);
+            window.app.vault.getResourcePath = function (file) {
+              var original = _origGetResourcePath(file);
+              return _owAssetHref(original) || original;
+            };
+          }
+
+          // MutationObserver fallback: rewrite any app:// or file:// src attrs
+          // that slip through (e.g. images in notes already open at load time,
+          // or plugins that bypass getResourcePath).
+          _owInstallAssetRewriter();
 
           // openPopoutLeaf: Obsidian checks for a native Electron BrowserWindow
           // via an internal validation function (V0) that throws "re-install"
