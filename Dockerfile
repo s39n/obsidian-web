@@ -9,6 +9,9 @@ COPY src/ src/
 COPY scripts/ scripts/
 COPY user-data/ user-data/
 COPY entrypoint.sh /entrypoint.sh
+
+# Static assets served from the project root (favicon, touch icon)
+COPY favicon.ico favicon.svg apple-touch-icon.png ./
 RUN chmod +x /entrypoint.sh
 
 # Install server dependencies (production only)

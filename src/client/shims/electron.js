@@ -18,6 +18,61 @@
  * are stubs that log so we can spot uses we missed.
  */
 (function (global) {
+  // ---- Clipboard image cache ------------------------------------------
+  //
+  // electron.clipboard.readImage() must return a NativeImage synchronously.
+  // The browser Clipboard API is async and blocked on plain HTTP anyway,
+  // so instead we intercept the native 'paste' DOM event (which fires before
+  // Obsidian's handler) and cache any image payload. readImage() returns the
+  // last cached image so Obsidian's paste handler gets real pixel data.
+  //
+  // The cache is overwritten on every paste that contains an image and cleared
+  // when Obsidian reads it (to avoid stale images showing up on text pastes).
+
+  let _clipboardImageCache = null; // { data: Uint8Array, mime: string } | null
+
+  document.addEventListener('paste', function (ev) {
+    const items = ev.clipboardData && ev.clipboardData.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (!file) continue;
+        const reader = new FileReader();
+        reader.onload = function () {
+          _clipboardImageCache = {
+            data: new Uint8Array(reader.result),
+            mime: item.type,
+          };
+        };
+        reader.readAsArrayBuffer(file);
+        break; // only need the first image
+      }
+    }
+  }, true); // capture phase so we run before Obsidian's listeners
+
+  function _makeNativeImage(cached) {
+    // Minimal NativeImage shim. Obsidian calls isEmpty() then toPNG() / toBuffer().
+    const empty = !cached;
+    return {
+      isEmpty:    () => empty,
+      toPNG:      () => (cached ? cached.data : new Uint8Array(0)),
+      toJPEG:     () => (cached ? cached.data : new Uint8Array(0)),
+      toBuffer:   () => (cached ? cached.data : new Uint8Array(0)),
+      toBitmap:   () => (cached ? cached.data : new Uint8Array(0)),
+      toDataURL:  () => {
+        if (!cached) return '';
+        let binary = '';
+        for (let i = 0; i < cached.data.length; i++) binary += String.fromCharCode(cached.data[i]);
+        return 'data:' + cached.mime + ';base64,' + btoa(binary);
+      },
+      getSize:    () => ({ width: 0, height: 0 }),
+      resize:     function () { return this; },
+      crop:       function () { return this; },
+    };
+  }
+
   // Save a reference to the real window.open BEFORE Obsidian patches it.
   // Obsidian overrides window.open to route URLs through its own link handler,
   // which calls ipcRenderer.send('open-url', ...) — so if our 'open-url'
@@ -593,6 +648,20 @@
     clipboard: {
       writeText: (text) => navigator.clipboard.writeText(text),
       readText: () => navigator.clipboard.readText(),
+      // Returns the image that was most recently pasted (captured via the DOM
+      // paste event above). Clears the cache so a subsequent text paste doesn't
+      // accidentally return a stale image.
+      readImage: () => {
+        const cached = _clipboardImageCache;
+        _clipboardImageCache = null;
+        return _makeNativeImage(cached);
+      },
+      // Returns the MIME types currently on the clipboard. Obsidian checks this
+      // to decide whether a paste contains an image. Report 'image/png' when
+      // our cache is populated (i.e. the user just pasted an image).
+      availableFormats: () => (_clipboardImageCache ? ['image/png'] : []),
+      hasImage: () => !!_clipboardImageCache,
+      writeImage: () => {},
     },
   };
   remote.BrowserWindow.getFocusedWindow = () => makeWindow();
