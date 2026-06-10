@@ -18,6 +18,13 @@
  * are stubs that log so we can spot uses we missed.
  */
 (function (global) {
+  // Save a reference to the real window.open BEFORE Obsidian patches it.
+  // Obsidian overrides window.open to route URLs through its own link handler,
+  // which calls ipcRenderer.send('open-url', ...) — so if our 'open-url'
+  // handler calls window.open, we get infinite recursion. Using this saved
+  // reference bypasses Obsidian's patch and opens a real new tab.
+  const _nativeWindowOpen = window.open.bind(window);
+
   function warnUnimplemented(name) {
     return function () {
       console.warn('[obsidian-web] electron.' + name + ' called but not implemented:', arguments);
@@ -360,8 +367,11 @@
       }
 
       // 'open-url' opens in a new tab.
+      // Use _nativeWindowOpen (saved before Obsidian patches window.open)
+      // to avoid the infinite recursion: Obsidian's patched window.open
+      // routes back through ipcRenderer.send('open-url', ...).
       if (channel === 'open-url' && args[0]) {
-        window.open(args[0], '_blank', 'noopener');
+        _nativeWindowOpen(args[0], '_blank', 'noopener');
         return;
       }
       // Application-menu IPC channels - ignored on web. Obsidian renders
@@ -408,7 +418,7 @@
   const remote = {
     shell: {
       showItemInFolder: warnUnimplemented('shell.showItemInFolder'),
-      openExternal: (url) => { window.open(url, '_blank', 'noopener'); return Promise.resolve(); },
+      openExternal: (url) => { _nativeWindowOpen(url, '_blank', 'noopener'); return Promise.resolve(); },
       openPath: warnUnimplemented('shell.openPath'),
     },
     dialog: {
