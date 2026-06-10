@@ -19,6 +19,16 @@
  * the browser can download them in parallel but executes them in order.
  */
 
+// Polyfill crypto.randomUUID for non-secure contexts (plain HTTP on LAN).
+// Browsers restrict this API to HTTPS/localhost; plugins like ion-sync need it.
+if (typeof crypto !== 'undefined' && !crypto.randomUUID) {
+  crypto.randomUUID = function () {
+    return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, (c) =>
+      (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
+    );
+  };
+}
+
 // Ordered list of Obsidian's renderer scripts — mirrors the old <script defer>
 // list in index.html. Keep in sync with obsidian/index.html if Obsidian is
 // updated to add or remove scripts.
