@@ -500,9 +500,29 @@
 
   const remote = {
     shell: {
-      showItemInFolder: warnUnimplemented('shell.showItemInFolder'),
+      // "Show in folder" — open the file directly in a new tab since we can't
+      // launch a native file manager. Strips the virtual /vault/ prefix and
+      // maps to /api/fs/read so the browser can display or download the asset.
+      showItemInFolder: (filePath) => {
+        const rel = (filePath || '').replace(/^\/vault\//, '').replace(/^\/+/, '');
+        const vaultId = global.__obsidianWeb && global.__obsidianWeb.vaultId;
+        const vaultParam = vaultId ? '&vault=' + encodeURIComponent(vaultId) : '';
+        _nativeWindowOpen('/api/fs/read?path=' + encodeURIComponent(rel) + vaultParam, '_blank', 'noopener');
+      },
       openExternal: (url) => { _nativeWindowOpen(url, '_blank', 'noopener'); return Promise.resolve(); },
-      openPath: warnUnimplemented('shell.openPath'),
+      // "Open path" — same as showItemInFolder for vault files; for anything
+      // else treat it like openExternal.
+      openPath: (filePath) => {
+        if ((filePath || '').startsWith('/vault/') || (filePath || '').startsWith('vault/')) {
+          const rel = (filePath || '').replace(/^\/vault\//, '').replace(/^\/+/, '');
+          const vaultId = global.__obsidianWeb && global.__obsidianWeb.vaultId;
+          const vaultParam = vaultId ? '&vault=' + encodeURIComponent(vaultId) : '';
+          _nativeWindowOpen('/api/fs/read?path=' + encodeURIComponent(rel) + vaultParam, '_blank', 'noopener');
+        } else {
+          _nativeWindowOpen(filePath, '_blank', 'noopener');
+        }
+        return Promise.resolve('');
+      },
     },
     dialog: {
       showOpenDialogSync: (opts) => {
