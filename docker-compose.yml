@@ -25,8 +25,11 @@ services:
       HOST: "0.0.0.0"
       PORT: "3000"
       VAULT_PATH: "${VAULT_PATH:-user-data/demo-vault}"
+      WATCH_POLLING: "${WATCH_POLLING:-false}"
       # VAULT_REGISTRY: "user-data/registry.json"
-      # WATCH_POLLING: "true"
+
+      # Auth — set AUTH_KEY in Dockhand's env editor or in a .env file
+      AUTH_KEY: "${AUTH_KEY:-}"
     env_file:
       - path: .env
         required: false
