@@ -53,7 +53,14 @@ function createElectronRouter(vaultRegistry, fallbackVaultRoot) {
   // For now we just delete; later we can move to ~/.local/share/Trash.
   router.post('/trash', express.json(), async (req, res) => {
     try {
-      const rel = req.body.path;
+      // Obsidian passes the virtual vault path (/vault/some/file.md).
+      // Strip the VAULT_BASE prefix so it resolves correctly against the
+      // real vault root (same stripping original-fs.js does for /api/fs/*).
+      let rel = req.body.path || '';
+      const vaultPrefix = VAULT_BASE + '/';
+      if (rel.startsWith(vaultPrefix)) rel = rel.slice(vaultPrefix.length);
+      else if (rel === VAULT_BASE) rel = '';
+      else rel = rel.replace(/^\/+/, '');
       const vaultRoot = getVaultRoot(req);
       const absolute = path.resolve(vaultRoot, '.' + path.sep + rel);
       const resolvedRoot = path.resolve(vaultRoot);
