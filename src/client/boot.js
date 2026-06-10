@@ -31,12 +31,20 @@ if (typeof crypto !== 'undefined' && !crypto.randomUUID) {
 
 // Polyfill crypto.subtle for non-secure contexts (plain HTTP on LAN).
 // Browsers only expose SubtleCrypto on HTTPS/localhost. Plugins like ion-sync
-// call crypto.subtle.digest('SHA-256', ...) for their auth token — without this
-// crypto.subtle is undefined and they throw "Cannot read properties of undefined
-// (reading 'digest')".
+// call digest / importKey / deriveKey / encrypt / decrypt — without this they
+// throw "Cannot read properties of undefined (reading 'digest')" etc.
 if (typeof crypto !== 'undefined' && !crypto.subtle) {
   (function () {
-    // Self-contained pure-JS SHA-256 (public domain).
+
+    // ── helpers ────────────────────────────────────────────────────────────
+    function _toU8(x) {
+      if (x instanceof Uint8Array) return x;
+      if (x instanceof ArrayBuffer) return new Uint8Array(x);
+      if (x && x.buffer instanceof ArrayBuffer) return new Uint8Array(x.buffer, x.byteOffset, x.byteLength);
+      return new Uint8Array(x);
+    }
+
+    // ── SHA-256 (pure JS, public domain) ──────────────────────────────────
     var _K = new Uint32Array([
       0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
       0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
@@ -59,19 +67,9 @@ if (typeof crypto !== 'undefined' && !crypto.subtle) {
       for(var i=0;i<bc;i++){
         var bv=new DataView(p.buffer,i*64,64);
         for(var t=0;t<16;t++)W[t]=bv.getUint32(t*4,false);
-        for(var t=16;t<64;t++){
-          var s0=_r(W[t-15],7)^_r(W[t-15],18)^(W[t-15]>>>3);
-          var s1=_r(W[t-2],17)^_r(W[t-2],19)^(W[t-2]>>>10);
-          W[t]=(W[t-16]+s0+W[t-7]+s1)>>>0;
-        }
+        for(var t=16;t<64;t++){var s0=_r(W[t-15],7)^_r(W[t-15],18)^(W[t-15]>>>3);var s1=_r(W[t-2],17)^_r(W[t-2],19)^(W[t-2]>>>10);W[t]=(W[t-16]+s0+W[t-7]+s1)>>>0;}
         var a=H[0],b=H[1],c=H[2],d=H[3],e=H[4],f=H[5],g=H[6],h=H[7];
-        for(var t=0;t<64;t++){
-          var S1=_r(e,6)^_r(e,11)^_r(e,25),ch=(e&f)^(~e&g);
-          var t1=(h+S1+ch+_K[t]+W[t])>>>0;
-          var S0=_r(a,2)^_r(a,13)^_r(a,22),maj=(a&b)^(a&c)^(b&c);
-          var t2=(S0+maj)>>>0;
-          h=g;g=f;f=e;e=(d+t1)>>>0;d=c;c=b;b=a;a=(t1+t2)>>>0;
-        }
+        for(var t=0;t<64;t++){var S1=_r(e,6)^_r(e,11)^_r(e,25),ch=(e&f)^(~e&g);var t1=(h+S1+ch+_K[t]+W[t])>>>0;var S0=_r(a,2)^_r(a,13)^_r(a,22),maj=(a&b)^(a&c)^(b&c);var t2=(S0+maj)>>>0;h=g;g=f;f=e;e=(d+t1)>>>0;d=c;c=b;b=a;a=(t1+t2)>>>0;}
         H[0]=(H[0]+a)>>>0;H[1]=(H[1]+b)>>>0;H[2]=(H[2]+c)>>>0;H[3]=(H[3]+d)>>>0;
         H[4]=(H[4]+e)>>>0;H[5]=(H[5]+f)>>>0;H[6]=(H[6]+g)>>>0;H[7]=(H[7]+h)>>>0;
       }
@@ -79,15 +77,199 @@ if (typeof crypto !== 'undefined' && !crypto.subtle) {
       for(var i=0;i<8;i++)ov.setUint32(i*4,H[i],false);
       return out;
     }
-    crypto.subtle = {
-      digest: function (algorithm, data) {
-        var name = (typeof algorithm === 'string' ? algorithm : (algorithm && algorithm.name) || '')
-          .toUpperCase().replace(/-/g, '');
-        if (name === 'SHA256') {
-          var bytes = _sha256(new Uint8Array(data instanceof ArrayBuffer ? data : data.buffer || data));
-          return Promise.resolve(bytes.buffer);
+
+    // ── AES-256 forward cipher (pure JS) ──────────────────────────────────
+    // S-box (forward)
+    var _AS = new Uint8Array([99,124,119,123,242,107,111,197,48,1,103,43,254,215,171,118,202,130,201,125,250,89,71,240,173,212,162,175,156,164,114,192,183,253,147,38,54,63,247,204,52,165,229,241,113,216,49,21,4,199,35,195,24,150,5,154,7,18,128,226,235,39,178,117,9,131,44,26,27,110,90,160,82,59,214,179,41,227,47,132,83,209,0,237,32,252,177,91,106,203,190,57,74,76,88,207,208,239,170,251,67,77,51,133,69,249,2,127,80,60,159,168,81,163,64,143,146,157,56,245,188,182,218,33,16,255,243,210,205,12,19,236,95,151,68,23,196,167,126,61,100,93,25,115,96,129,79,220,34,42,144,136,70,238,184,20,222,94,11,219,224,50,58,10,73,6,36,92,194,211,172,98,145,149,228,121,231,200,55,109,141,213,78,169,108,86,244,234,101,122,174,8,186,120,37,46,28,166,180,198,232,221,116,31,75,189,139,138,112,62,181,102,72,3,246,14,97,53,87,185,134,193,29,158,225,248,152,17,105,217,142,148,155,30,135,233,206,85,40,223,140,161,137,13,191,230,66,104,65,153,45,15,176,84,187,22]);
+    // Round constants for AES-256 key schedule (7 values needed: rounds at i=8,16,…,56)
+    var _ARC = new Uint32Array([0x01000000,0x02000000,0x04000000,0x08000000,0x10000000,0x20000000,0x40000000]);
+    // GF(2^8) × 2 table
+    var _AX2 = new Uint8Array(256);
+    for (var _ai=0;_ai<256;_ai++) _AX2[_ai]=((_ai<<1)^(_ai&0x80?0x1b:0))&0xff;
+
+    function _aesKeyExp(key) {
+      // key: 32-byte Uint8Array → 60-word key schedule (AES-256, 14 rounds)
+      var W=new Uint32Array(60);
+      for (var i=0;i<8;i++) W[i]=(key[4*i]<<24)|(key[4*i+1]<<16)|(key[4*i+2]<<8)|key[4*i+3];
+      for (var i=8;i<60;i++) {
+        var t=W[i-1];
+        if (i%8===0) {
+          // SubWord(RotWord(t)) XOR Rcon
+          t=(_AS[(t>>16)&0xff]<<24)|(_AS[(t>>8)&0xff]<<16)|(_AS[t&0xff]<<8)|_AS[(t>>24)&0xff];
+          t^=_ARC[(i>>3)-1];
+        } else if (i%8===4) {
+          t=(_AS[(t>>24)&0xff]<<24)|(_AS[(t>>16)&0xff]<<16)|(_AS[(t>>8)&0xff]<<8)|_AS[t&0xff];
         }
-        return Promise.reject(new Error('crypto.subtle.digest polyfill: unsupported algorithm "' + algorithm + '"'));
+        W[i]=W[i-8]^t;
+      }
+      return W;
+    }
+
+    function _aesEnc(blk, W) {
+      // Encrypt one 16-byte block. State is column-major: column c = bytes s[4c..4c+3].
+      var s=new Uint8Array(16); s.set(blk);
+      // Round 0: AddRoundKey
+      for (var c=0;c<4;c++){var w=W[c];s[4*c]^=(w>>24)&0xff;s[4*c+1]^=(w>>16)&0xff;s[4*c+2]^=(w>>8)&0xff;s[4*c+3]^=w&0xff;}
+      for (var round=1;round<=14;round++) {
+        // SubBytes
+        for (var i=0;i<16;i++) s[i]=_AS[s[i]];
+        // ShiftRows: row r (= indices r,4+r,8+r,12+r) shifts left by r
+        var t;
+        t=s[1];s[1]=s[5];s[5]=s[9];s[9]=s[13];s[13]=t;         // row 1: shift-left 1
+        t=s[2];s[2]=s[10];s[10]=t; t=s[6];s[6]=s[14];s[14]=t;  // row 2: shift-left 2
+        t=s[15];s[15]=s[11];s[11]=s[7];s[7]=s[3];s[3]=t;        // row 3: shift-left 3
+        // MixColumns (skipped in last round)
+        if (round<14) {
+          for (var c=0;c<4;c++) {
+            var i=4*c,a=s[i],b=s[i+1],cc=s[i+2],d=s[i+3];
+            s[i]  =_AX2[a]^_AX2[b]^b^cc^d;
+            s[i+1]=a^_AX2[b]^_AX2[cc]^cc^d;
+            s[i+2]=a^b^_AX2[cc]^_AX2[d]^d;
+            s[i+3]=_AX2[a]^a^b^cc^_AX2[d];
+          }
+        }
+        // AddRoundKey
+        for (var c=0;c<4;c++){var w=W[round*4+c];s[4*c]^=(w>>24)&0xff;s[4*c+1]^=(w>>16)&0xff;s[4*c+2]^=(w>>8)&0xff;s[4*c+3]^=w&0xff;}
+      }
+      return s;
+    }
+
+    // ── AES-GCM ───────────────────────────────────────────────────────────
+    // GF(2^128) multiply per GCM spec: R = 0xe1 followed by 15 zero bytes.
+    function _gcmMul(X, Y) {
+      var Z=new Uint8Array(16), V=new Uint8Array(Y);
+      for (var i=0;i<16;i++) {
+        for (var j=7;j>=0;j--) {
+          if ((X[i]>>j)&1) for (var k=0;k<16;k++) Z[k]^=V[k];
+          var lsb=V[15]&1;
+          for (var k=15;k>0;k--) V[k]=(V[k]>>>1)|((V[k-1]&1)<<7);
+          V[0]=V[0]>>>1;
+          if (lsb) V[0]^=0xe1;
+        }
+      }
+      return Z;
+    }
+
+    // Compute GCM auth tag: GHASH(pad(AAD)||pad(CT)||len64(AAD)||len64(CT)) then XOR AES(J0).
+    function _gcmTag(W, H, J0, ct, aad) {
+      var ap=(16-aad.length%16)%16, cp=(16-ct.length%16)%16;
+      var buf=new Uint8Array(aad.length+ap+ct.length+cp+16);
+      buf.set(aad,0); buf.set(ct,aad.length+ap);
+      var lo=aad.length+ap+ct.length+cp;
+      var ab=aad.length*8, cb=ct.length*8;
+      // 64-bit big-endian lengths (upper 32 bits are 0 for files < 512 MB)
+      buf[lo+4]=(ab>>>24)&0xff;buf[lo+5]=(ab>>>16)&0xff;buf[lo+6]=(ab>>>8)&0xff;buf[lo+7]=ab&0xff;
+      buf[lo+12]=(cb>>>24)&0xff;buf[lo+13]=(cb>>>16)&0xff;buf[lo+14]=(cb>>>8)&0xff;buf[lo+15]=cb&0xff;
+      // GHASH
+      var Y=new Uint8Array(16);
+      for (var i=0;i<buf.length;i+=16) {
+        var blk=new Uint8Array(16); blk.set(buf.slice(i,i+16));
+        for (var j=0;j<16;j++) Y[j]^=blk[j];
+        Y=_gcmMul(Y,H);
+      }
+      // T = AES(J0) XOR GHASH
+      var EJ=_aesEnc(J0,W), T=new Uint8Array(16);
+      for (var i=0;i<16;i++) T[i]=EJ[i]^Y[i];
+      return T;
+    }
+
+    // CTR-mode keystream: counter starts at INC32(J0), increments for each 16-byte block.
+    function _gcmCtr(W, J0, data) {
+      var ctr=new Uint8Array(J0), out=new Uint8Array(data.length);
+      for (var i=0;i<data.length;i+=16) {
+        var v=((ctr[12]<<24)|(ctr[13]<<16)|(ctr[14]<<8)|ctr[15]);
+        v=(v+1)>>>0;
+        ctr[12]=(v>>24)&0xff;ctr[13]=(v>>16)&0xff;ctr[14]=(v>>8)&0xff;ctr[15]=v&0xff;
+        var ks=_aesEnc(ctr,W);
+        for (var j=0;j<Math.min(16,data.length-i);j++) out[i+j]=data[i+j]^ks[j];
+      }
+      return out;
+    }
+
+    // ── CryptoKey shim ────────────────────────────────────────────────────
+    function _OWKey(data, alg) { this.__ow_data=data; this.__ow_alg=alg; }
+
+    // ── crypto.subtle ─────────────────────────────────────────────────────
+    crypto.subtle = {
+
+      // SHA-256 only
+      digest: function (algorithm, data) {
+        var name=(typeof algorithm==='string'?algorithm:(algorithm&&algorithm.name)||'')
+          .toUpperCase().replace(/-/g,'');
+        if (name==='SHA256') return Promise.resolve(_sha256(_toU8(data)).buffer);
+        return Promise.reject(new Error('[polyfill] crypto.subtle.digest: unsupported "'+algorithm+'"'));
+      },
+
+      // Wrap raw key material for later use by deriveKey / encrypt / decrypt
+      importKey: function (format, keyData, algorithm, extractable, usages) {
+        if (format==='raw') {
+          var alg=(typeof algorithm==='string'?algorithm:(algorithm&&algorithm.name)||'').toUpperCase();
+          return Promise.resolve(new _OWKey(_toU8(keyData), alg));
+        }
+        return Promise.reject(new Error('[polyfill] crypto.subtle.importKey: unsupported format "'+format+'"'));
+      },
+
+      // PBKDF2 only — offloaded to /api/pbkdf2 (native Node crypto) because
+      // 100 000 iterations of pure-JS SHA-256 would freeze the browser for ~10 s.
+      deriveKey: function (algorithm, baseKey, derivedKeyType, extractable, usages) {
+        var algName=(typeof algorithm==='string'?algorithm:(algorithm&&algorithm.name)||'').toUpperCase();
+        if (algName==='PBKDF2') {
+          var salt=_toU8(algorithm.salt), iters=algorithm.iterations;
+          var dkLen=((derivedKeyType&&derivedKeyType.length)||256)/8;
+          var pwHex=Array.from(baseKey.__ow_data).map(function(b){return b.toString(16).padStart(2,'0');}).join('');
+          var saltHex=Array.from(salt).map(function(b){return b.toString(16).padStart(2,'0');}).join('');
+          return fetch('/api/pbkdf2',{
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({password:pwHex,salt:saltHex,iterations:iters,keyLen:dkLen})
+          }).then(function(r){
+            if(!r.ok) throw new Error('[polyfill] /api/pbkdf2 returned '+r.status);
+            return r.json();
+          }).then(function(d){
+            var dk=new Uint8Array(dkLen);
+            for (var i=0;i<dkLen;i++) dk[i]=parseInt(d.key.slice(i*2,i*2+2),16);
+            return new _OWKey(dk,'AES-GCM');
+          });
+        }
+        return Promise.reject(new Error('[polyfill] crypto.subtle.deriveKey: unsupported "'+algName+'"'));
+      },
+
+      // AES-GCM encrypt — returns ArrayBuffer of ciphertext || 16-byte auth tag
+      encrypt: function (algorithm, key, data) {
+        var name=(typeof algorithm==='string'?algorithm:(algorithm&&algorithm.name)||'').toUpperCase();
+        if (name==='AES-GCM') {
+          try {
+            var iv=_toU8(algorithm.iv), pt=_toU8(data);
+            var W=_aesKeyExp(key.__ow_data);
+            var H=_aesEnc(new Uint8Array(16),W);
+            var J0=new Uint8Array(16); J0.set(iv.slice(0,12)); J0[15]=1;
+            var ct=_gcmCtr(W,J0,pt);
+            var tag=_gcmTag(W,H,J0,ct,new Uint8Array(0));
+            var out=new Uint8Array(ct.length+16); out.set(ct); out.set(tag,ct.length);
+            return Promise.resolve(out.buffer);
+          } catch(e) { return Promise.reject(e); }
+        }
+        return Promise.reject(new Error('[polyfill] crypto.subtle.encrypt: unsupported "'+name+'"'));
+      },
+
+      // AES-GCM decrypt — input is ciphertext || 16-byte auth tag
+      decrypt: function (algorithm, key, data) {
+        var name=(typeof algorithm==='string'?algorithm:(algorithm&&algorithm.name)||'').toUpperCase();
+        if (name==='AES-GCM') {
+          try {
+            var iv=_toU8(algorithm.iv), buf=_toU8(data);
+            if (buf.length<16) throw new Error('[polyfill] AES-GCM: data too short');
+            var ct=buf.slice(0,buf.length-16), tag=buf.slice(buf.length-16);
+            var W=_aesKeyExp(key.__ow_data);
+            var H=_aesEnc(new Uint8Array(16),W);
+            var J0=new Uint8Array(16); J0.set(iv.slice(0,12)); J0[15]=1;
+            var expectedTag=_gcmTag(W,H,J0,ct,new Uint8Array(0));
+            var ok=true; for (var i=0;i<16;i++) ok=ok&&(tag[i]===expectedTag[i]);
+            if (!ok) return Promise.reject(new DOMException('AES-GCM: tag mismatch','OperationError'));
+            return Promise.resolve(_gcmCtr(W,J0,ct).buffer);
+          } catch(e) { return Promise.reject(e); }
+        }
+        return Promise.reject(new Error('[polyfill] crypto.subtle.decrypt: unsupported "'+name+'"'));
       },
     };
   })();

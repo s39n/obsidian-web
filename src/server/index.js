@@ -23,6 +23,7 @@ const createBootstrapRouter = require('./api/bootstrap');
 const { warmUpBootstrapCache } = require('./api/bootstrap');
 const createProxyRouter = require('./api/proxy');
 const createKeytarRouter = require('./api/keytar');
+const createPbkdf2Router = require('./api/pbkdf2');
 const attachWatchServer = require('./api/watch');
 const VaultRegistry = require('./vault-registry');
 const { createAuthMiddleware } = require('./middleware/auth');
@@ -137,6 +138,7 @@ function createApp(appConfig = config) {
 
   // API routes.
   app.use('/api/keytar', createKeytarRouter(appConfig.userDataPath));
+  app.use('/api/pbkdf2', createPbkdf2Router());
   app.use('/api/bootstrap', createBootstrapRouter(vaultRegistry, appConfig.vaultPath));
   app.use('/api/proxy-request', createProxyRouter());
   app.use('/api/vaults', createVaultsRouter(vaultRegistry));
