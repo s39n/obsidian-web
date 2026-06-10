@@ -305,6 +305,9 @@
         }
       }
 
+      if (channel.toLowerCase().includes('key') || channel.toLowerCase().includes('crypt') || channel.toLowerCase().includes('safe') || channel.toLowerCase().includes('pass')) {
+        console.warn('[obsidian-web] KEYCHAIN-RELATED ipcRenderer.sendSync:', channel, JSON.stringify(args));
+      }
       console.warn('[obsidian-web] unhandled ipcRenderer.sendSync:', channel, args);
       window.__owMissing && window.__owMissing.record('sendSync', channel);
       return null;
@@ -384,6 +387,9 @@
       ) {
         return;
       }
+      if (channel.toLowerCase().includes('key') || channel.toLowerCase().includes('crypt') || channel.toLowerCase().includes('safe') || channel.toLowerCase().includes('pass')) {
+        console.warn('[obsidian-web] KEYCHAIN-RELATED ipcRenderer.send:', channel, JSON.stringify(args));
+      }
       console.warn('[obsidian-web] unhandled ipcRenderer.send:', channel, args);
       window.__owMissing && window.__owMissing.record('send', channel);
     },
@@ -453,10 +459,11 @@
     safeStorage: {
       isEncryptionAvailable() { return true; },
       encryptString(text) {
-        // Return a Buffer-like Uint8Array of the UTF-8 bytes
+        console.log('[obsidian-web] safeStorage.encryptString called, length:', text && text.length);
         return new TextEncoder().encode(text);
       },
       decryptString(buf) {
+        console.log('[obsidian-web] safeStorage.decryptString called, type:', typeof buf, buf && buf.constructor && buf.constructor.name);
         return new TextDecoder().decode(buf);
       },
     },
