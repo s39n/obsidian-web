@@ -4,35 +4,46 @@ services:
     ports:
       - "${PORT:-3000}:3000"
     volumes:
-      # Vault and registry persist on the host — safe across container rebuilds
+      # ── Vault ──────────────────────────────────────────────────────────────
+      # Option A (default): use the built-in demo vault
       - ./user-data:/app/user-data
-      # Obsidian renderer bundles — downloaded on first start, cached across restarts
+
+      # Option B: mount YOUR OWN vault folder from the host.
+      # 1. Uncomment the line below, replacing the left side with your path.
+      # 2. Set VAULT_PATH (in environment below) to match the right side.
+      # - /path/to/your/vault:/app/vaults/my-vault
+
+      # ── Plugins ────────────────────────────────────────────────────────────
+      # Mount a folder of extra Obsidian plugins into the container.
+      # Uncomment and point at your local .obsidian/plugins directory.
+      # - /path/to/your/.obsidian/plugins:/app/user-data/demo-vault/.obsidian/plugins
+
+      # ── Obsidian renderer bundles (downloaded on first start) ───────────────
       - obsidian_vendor:/app/vendor
+
     environment:
       HOST: "0.0.0.0"
       PORT: "3000"
+
+      # Path to the active vault — relative to the project root (/app inside
+      # the container), or absolute. Change this if you use Option B above.
       VAULT_PATH: "user-data/demo-vault"
+
       # VAULT_REGISTRY: "user-data/registry.json"
       # WATCH_POLLING: "true"   # enable for NFS / SMB / FUSE-mounted vaults
 
       # ── Auth Option 1: API Key ─────────────────────────────────────────────
-      # Uncomment and set AUTH_KEY to enable a login page + cookie session.
-      # In Dockhand you can set this in the stack's environment editor instead.
-      # AUTH_KEY: "change-me"
+      # Set AUTH_KEY via a .env file or Dockhand's environment editor.
+      # Never commit a real key here — this file is public.
+      # AUTH_KEY: "${AUTH_KEY}"
+    env_file:
+      - path: .env
+        required: false     # silently ignored if .env doesn't exist
     restart: unless-stopped
 
   # ── Auth Option 2: HTTP Basic Auth via nginx ────────────────────────────────
-  # Puts nginx in front of the app with username/password protection.
-  # Also handles WebSocket upgrade for real-time vault sync (/api/watch).
-  #
-  # Setup (run once on the host):
-  #   htpasswd -c nginx.htpasswd <username>
-  #
-  # To start with this option:
-  #   docker compose --profile auth-nginx up
-  #
-  # When using this profile, comment out the `ports` on obsidian-web above
-  # so the app is only reachable through nginx, not directly.
+  # Setup: htpasswd -c nginx.htpasswd <username>
+  # Start: docker compose --profile auth-nginx up
   nginx:
     profiles: ["auth-nginx"]
     image: nginx:alpine
@@ -46,6 +57,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  # Named volume so the downloaded Obsidian bundles survive container rebuilds.
-  # Delete with `docker volume rm obsidian_vendor` to force a fresh download.
   obsidian_vendor:
