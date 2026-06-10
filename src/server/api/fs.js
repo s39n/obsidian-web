@@ -165,16 +165,46 @@ function createFsRouter(vaultRegistry, fallbackVaultRoot) {
     // routine "wrong shape" errors that Obsidian handles via try/catch.
     // We return 404 so the client-side fetch wrapper treats them like
     // any other "not found" without alarming console errors.
+    //
+    // ENOTDIR is also remapped to ENOENT in the JSON code field: a file
+    // sitting where a directory should be is vault corruption. Surfacing
+    // ENOENT lets callers (e.g. ion-sync) treat the path as "not yet
+    // created" and attempt a write, which goes through mkdirRepair below.
     const status = err.code === 'ENOENT' ? 404
       : err.code === 'EACCES' ? 403
       : err.code === 'EISDIR' ? 404
       : err.code === 'ENOTDIR' ? 404
       : err.code === 'ENOVAULT' ? 404
       : 500;
-    res.status(status).json({
-      error: err.message,
-      code: err.code || null,
-    });
+    const code = err.code === 'ENOTDIR' ? 'ENOENT' : (err.code || null);
+    res.status(status).json({ error: err.message, code });
+  }
+
+  // mkdir -p with automatic repair: if a regular file is blocking the creation
+  // of a directory (ENOTDIR), walk the path to find it, unlink it, then retry.
+  // This fixes vaults where a file was written where a directory should be
+  // (common when a sync restores a directory before its parent was deleted).
+  async function mkdirRepair(dirPath) {
+    try {
+      await fsp.mkdir(dirPath, { recursive: true });
+    } catch (err) {
+      if (err.code !== 'ENOTDIR') throw err;
+      const root = path.parse(dirPath).root;           // '/' on Linux, 'C:\' on Windows
+      const relative = path.relative(root, dirPath);   // path minus root
+      let probe = root;
+      for (const part of relative.split(path.sep)) {
+        if (!part) continue;
+        probe = path.join(probe, part);
+        let st;
+        try { st = await fsp.stat(probe); } catch (_) { break; }
+        if (!st.isDirectory()) {
+          await fsp.unlink(probe);
+          console.warn('[fs] Removed stale file blocking directory creation:', probe);
+          break;
+        }
+      }
+      await fsp.mkdir(dirPath, { recursive: true }); // retry after repair
+    }
   }
 
   // Stat a single entry.
@@ -420,7 +450,7 @@ function createFsRouter(vaultRegistry, fallbackVaultRoot) {
         } catch (_) { /* malformed JSON: pass through as-is */ }
       }
 
-      await fsp.mkdir(path.dirname(target), { recursive: true });
+      await mkdirRepair(path.dirname(target));
 
       // If this file was written recently, coalesce instead of hitting disk.
       if (shouldCoalesce(target)) {
