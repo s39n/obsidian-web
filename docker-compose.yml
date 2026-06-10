@@ -2,7 +2,10 @@ services:
   obsidian-web:
     build: .
     ports:
-      - "${PORT:-3000}:3000"
+      # Direct access (no auth). APP_PORT defaults to 3000.
+      # When using the auth-nginx profile, set APP_PORT to something unused
+      # (e.g. 3001) so nginx can take port 3000 without a conflict.
+      - "${APP_PORT:-3000}:3000"
     volumes:
       # Set these in .env (or Dockhand's env editor) to point at folders on
       # your host. Defaults keep everything self-contained in the repo.
@@ -33,8 +36,10 @@ services:
     restart: unless-stopped
 
   # Auth Option 2: HTTP Basic Auth via nginx
+  # nginx takes PORT (default 3000) as the public-facing port and proxies
+  # internally to obsidian-web:3000 — no host port conflict.
   # Setup: htpasswd -c nginx.htpasswd <username>
-  # Start: docker compose --profile auth-nginx up
+  # Start: APP_PORT=3001 docker compose --profile auth-nginx up
   nginx:
     profiles: ["auth-nginx"]
     image: nginx:alpine
