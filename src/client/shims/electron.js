@@ -305,9 +305,6 @@
         }
       }
 
-      if (channel.toLowerCase().includes('key') || channel.toLowerCase().includes('crypt') || channel.toLowerCase().includes('safe') || channel.toLowerCase().includes('pass')) {
-        console.warn('[obsidian-web] KEYCHAIN-RELATED ipcRenderer.sendSync:', channel, JSON.stringify(args));
-      }
       console.warn('[obsidian-web] unhandled ipcRenderer.sendSync:', channel, args);
       window.__owMissing && window.__owMissing.record('sendSync', channel);
       return null;
@@ -387,9 +384,6 @@
       ) {
         return;
       }
-      if (channel.toLowerCase().includes('key') || channel.toLowerCase().includes('crypt') || channel.toLowerCase().includes('safe') || channel.toLowerCase().includes('pass')) {
-        console.warn('[obsidian-web] KEYCHAIN-RELATED ipcRenderer.send:', channel, JSON.stringify(args));
-      }
       console.warn('[obsidian-web] unhandled ipcRenderer.send:', channel, args);
       window.__owMissing && window.__owMissing.record('send', channel);
     },
@@ -454,17 +448,35 @@
       getFocusedWebContents: () => null,
     },
     // safeStorage: Electron's credential encryption API (used for keychain).
-    // Since our keychain is stored server-side there's no OS-level encryption
-    // to do here — we pass data through as-is (UTF-8 bytes / string).
+    // Obsidian stores the encryptString() result in localStorage. Since
+    // localStorage only stores strings, a Uint8Array gets coerced to
+    // "116,101,115,116" (comma-separated numbers). We use a tagged base64
+    // string instead so the round-trip through localStorage is lossless.
     safeStorage: {
       isEncryptionAvailable() { return true; },
       encryptString(text) {
-        console.log('[obsidian-web] safeStorage.encryptString called, length:', text && text.length);
-        return new TextEncoder().encode(text);
+        // Encode as a tagged base64 string — survives localStorage serialization
+        const bytes = new TextEncoder().encode(text);
+        const b64 = btoa(String.fromCharCode(...bytes));
+        // Return a string so localStorage.setItem/getItem is lossless
+        return 'OW:' + b64;
       },
       decryptString(buf) {
-        console.log('[obsidian-web] safeStorage.decryptString called, type:', typeof buf, buf && buf.constructor && buf.constructor.name);
-        return new TextDecoder().decode(buf);
+        // buf may be a string (from localStorage) or Uint8Array (from a file read)
+        let str = typeof buf === 'string' ? buf : new TextDecoder().decode(buf);
+        if (str.startsWith('OW:')) {
+          try {
+            const bin = atob(str.slice(3));
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            return new TextDecoder().decode(bytes);
+          } catch (_) {}
+        }
+        // Legacy: comma-separated numbers from old Uint8Array.toString()
+        if (/^\d+(,\d+)*$/.test(str)) {
+          return new TextDecoder().decode(new Uint8Array(str.split(',').map(Number)));
+        }
+        return str;
       },
     },
     nativeTheme: (function () {
