@@ -97,8 +97,21 @@ function createElectronRouter(vaultRegistry, fallbackVaultRoot) {
   });
 
   // ipcRenderer.sendSync('file-url', filePath)
+  // Obsidian calls this to turn a vault-relative virtual path (e.g.
+  // /vault/images/photo.png) into a URL it can use as <img src>.
+  // In Electron that works via the app:// protocol; in a browser we must
+  // return a real HTTP URL. We strip the virtual vault prefix and return
+  // a path to our /api/fs/read endpoint, which serves the raw binary.
   router.get('/file-url', (req, res) => {
-    res.json({ value: 'file://' + (req.query.path || '') });
+    const filePath = req.query.path || '';
+    // Strip the virtual vault base prefix (/vault/ by default).
+    const prefix = VAULT_BASE + '/';
+    const relative = filePath.startsWith(prefix)
+      ? filePath.slice(prefix.length)
+      : filePath.replace(/^\/+/, '');
+    const vault = getCurrentVault(req);
+    const vaultParam = vault ? '&vault=' + encodeURIComponent(vault.id) : '';
+    res.json({ value: '/api/fs/read?path=' + encodeURIComponent(relative) + vaultParam });
   });
 
   // ipcRenderer.sendSync('version')

@@ -822,6 +822,87 @@ const OBSIDIAN_SCRIPTS = [
           obs.observe(document.body, { childList: true, subtree: true });
         }
 
+        // Rewrite app:// and file:// asset URLs in img/video/audio/source
+        // elements to HTTP paths our server can serve.
+        // Obsidian constructs these via vault.getResourcePath(), which in
+        // Electron returns app://local/<vaultRoot>/<relPath>. We intercept
+        // them here and redirect to /api/fs/read?path=<relPath>.
+        _owInstallAssetRewriter();
+
+        // Converts an app:// or file:// asset URL to an /api/fs/read HTTP URL.
+        // app://local/vault/images/photo.png → /api/fs/read?path=images%2Fphoto.png
+        // file:///vault/images/photo.png    → /api/fs/read?path=images%2Fphoto.png
+        function _owAssetHref(src) {
+          if (!src) return null;
+          var vaultId = window.__obsidianWeb && window.__obsidianWeb.vaultId;
+          var vaultParam = vaultId ? '&vault=' + encodeURIComponent(vaultId) : '';
+          var rel = null;
+
+          if (src.startsWith('app://local/')) {
+            // app://local/<vaultBase>/<rel>  e.g. app://local/vault/img.png
+            var after = src.slice('app://local/'.length); // 'vault/img.png'
+            var vaultBase = 'vault'; // matches VAULT_BASE ('/vault') without leading slash
+            if (after.startsWith(vaultBase + '/')) {
+              rel = after.slice(vaultBase.length + 1);
+            } else {
+              rel = after; // fallback: use entire path after app://local/
+            }
+          } else if (src.startsWith('file:///vault/')) {
+            rel = src.slice('file:///vault/'.length);
+          } else if (src.startsWith('file:///')) {
+            rel = src.slice('file:///'.length);
+          }
+
+          if (!rel) return null;
+          return '/api/fs/read?path=' + encodeURIComponent(rel) + vaultParam;
+        }
+
+        function _owFixAssetEl(el) {
+          var src = el.getAttribute('src') || el.getAttribute('href');
+          if (!src) return;
+          if (!src.startsWith('app://') && !src.startsWith('file://')) return;
+          var fixed = _owAssetHref(src);
+          if (!fixed) return;
+          if (el.tagName === 'LINK') {
+            el.setAttribute('href', fixed);
+          } else {
+            el.setAttribute('src', fixed);
+          }
+        }
+
+        function _owInstallAssetRewriter() {
+          // Fix any already-present asset elements (shouldn't be any yet, but
+          // running it once costs nothing).
+          ['img', 'video', 'audio', 'source'].forEach(function (tag) {
+            document.querySelectorAll(tag).forEach(_owFixAssetEl);
+          });
+
+          // Watch for new/modified elements and fix them as they appear.
+          var assetObs = new MutationObserver(function (mutations) {
+            for (var i = 0; i < mutations.length; i++) {
+              var m = mutations[i];
+              // New nodes added to DOM.
+              for (var j = 0; j < m.addedNodes.length; j++) {
+                var node = m.addedNodes[j];
+                if (node.nodeType !== 1) continue; // elements only
+                _owFixAssetEl(node);
+                // Also fix descendants (e.g. an <img> inside an added <div>).
+                node.querySelectorAll && node.querySelectorAll('img,video,audio,source').forEach(_owFixAssetEl);
+              }
+              // src/href attribute changed on an existing element.
+              if (m.type === 'attributes') {
+                _owFixAssetEl(m.target);
+              }
+            }
+          });
+          assetObs.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['src', 'href'],
+          });
+        }
+
         // Patch workspace methods that rely on Electron-native APIs unavailable
         // in the browser. Retries briefly in case window.app is not yet set.
         function _owPatchWorkspace(attempt) {

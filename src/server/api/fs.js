@@ -421,7 +421,18 @@ function createFsRouter(vaultRegistry, fallbackVaultRoot) {
         res.type('text/plain; charset=utf-8').send(data);
       } else {
         const data = await fsp.readFile(target);
-        res.type('application/octet-stream').send(data);
+        // Use a proper MIME type for common asset types so browsers can render
+        // them inline (img src, audio, video). Fall back to octet-stream.
+        const ext = path.extname(relPath).toLowerCase();
+        const MIME = {
+          '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+          '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+          '.bmp': 'image/bmp', '.ico': 'image/x-icon', '.avif': 'image/avif',
+          '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm',
+          '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4',
+          '.pdf': 'application/pdf',
+        };
+        res.type(MIME[ext] || 'application/octet-stream').send(data);
       }
     } catch (err) {
       handleError(res, err);
