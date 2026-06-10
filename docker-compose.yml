@@ -5,18 +5,38 @@ services:
       - "${PORT:-3000}:3000"
     volumes:
       # ── Vault ──────────────────────────────────────────────────────────────
-      # Option A (default): use the built-in demo vault
+      # Option A (default): built-in demo vault — good for trying things out
       - ./user-data:/app/user-data
 
-      # Option B: mount YOUR OWN vault folder from the host.
-      # 1. Uncomment the line below, replacing the left side with your path.
-      # 2. Set VAULT_PATH (in environment below) to match the right side.
+      # Option B: mount your entire vault from the host.
+      # This is the recommended approach for real use — your notes, settings,
+      # plugins, themes, snippets and fonts all live in one place on the host.
+      # 1. Uncomment the two lines below.
+      # 2. Replace /path/to/your/vault with the actual path on your machine.
+      # 3. Set VAULT_PATH below to match the right-hand side of the mount.
       # - /path/to/your/vault:/app/vaults/my-vault
+      # (then set VAULT_PATH: "vaults/my-vault" in environment below)
 
-      # ── Plugins ────────────────────────────────────────────────────────────
-      # Mount a folder of extra Obsidian plugins into the container.
-      # Uncomment and point at your local .obsidian/plugins directory.
-      # - /path/to/your/.obsidian/plugins:/app/user-data/demo-vault/.obsidian/plugins
+      # ── Granular Obsidian config folders ───────────────────────────────────
+      # Use these if you want to manage individual parts of .obsidian/ from
+      # the host while keeping notes elsewhere, or to share a plugin/theme
+      # folder across multiple vaults.
+      # Uncomment whichever you need:
+
+      # Community plugins
+      # - /path/to/.obsidian/plugins:/app/user-data/demo-vault/.obsidian/plugins
+
+      # Themes (.obsidian/themes/ — contains theme CSS files)
+      # - /path/to/.obsidian/themes:/app/user-data/demo-vault/.obsidian/themes
+
+      # CSS snippets (.obsidian/snippets/ — small custom CSS overrides)
+      # - /path/to/.obsidian/snippets:/app/user-data/demo-vault/.obsidian/snippets
+
+      # Custom fonts (.obsidian/fonts/)
+      # - /path/to/.obsidian/fonts:/app/user-data/demo-vault/.obsidian/fonts
+
+      # All Obsidian settings at once (plugins + themes + snippets + fonts + config)
+      # - /path/to/.obsidian:/app/user-data/demo-vault/.obsidian
 
       # ── Obsidian renderer bundles (downloaded on first start) ───────────────
       - obsidian_vendor:/app/vendor
@@ -25,20 +45,19 @@ services:
       HOST: "0.0.0.0"
       PORT: "3000"
 
-      # Path to the active vault — relative to the project root (/app inside
-      # the container), or absolute. Change this if you use Option B above.
+      # Change this if using Option B above (right-hand side of the volume mount)
       VAULT_PATH: "user-data/demo-vault"
 
       # VAULT_REGISTRY: "user-data/registry.json"
       # WATCH_POLLING: "true"   # enable for NFS / SMB / FUSE-mounted vaults
 
-      # ── Auth Option 1: API Key ─────────────────────────────────────────────
-      # Set AUTH_KEY via a .env file or Dockhand's environment editor.
-      # Never commit a real key here — this file is public.
+      # ── Auth (Option 1: API Key) ───────────────────────────────────────────
+      # Set AUTH_KEY in a .env file or in Dockhand's environment editor.
+      # Never put a real key here — this file is public.
       # AUTH_KEY: "${AUTH_KEY}"
     env_file:
       - path: .env
-        required: false     # silently ignored if .env doesn't exist
+        required: false
     restart: unless-stopped
 
   # ── Auth Option 2: HTTP Basic Auth via nginx ────────────────────────────────
