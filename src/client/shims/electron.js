@@ -448,35 +448,93 @@
       getFocusedWebContents: () => null,
     },
     // safeStorage: Electron's credential encryption API (used for keychain).
-    // Obsidian stores the encryptString() result in localStorage. Since
-    // localStorage only stores strings, a Uint8Array gets coerced to
-    // "116,101,115,116" (comma-separated numbers). We use a tagged base64
-    // string instead so the round-trip through localStorage is lossless.
+    //
+    // Problem: In real Electron, encryptString() returns a Buffer (binary).
+    // Obsidian may store it by first doing Buffer.from(result, 'base64'), so
+    // any non-base64-safe tag in our return value gets corrupted on the
+    // round-trip. Previous fix ('OW:' prefix) broke because ':' is not a
+    // valid base64 character.
+    //
+    // Solution: Store the actual secret server-side (in .keychain.json via
+    // the /api/keytar endpoint, using synchronous XHR so encryptString stays
+    // synchronous). Return a token that is the base64 encoding of 'ow:' + id.
+    //
+    //   encryptString('secret') → stores secret, returns btoa('ow:abc123...')
+    //     e.g. 'b3c6YWJj...'
+    //
+    // The token survives EITHER storage path:
+    //   • String path: stored/retrieved as 'b3c6YWJj...' → atob() → 'ow:id' → lookup ✓
+    //   • Buffer path: Buffer.from('b3c6YWJj...', 'base64') → Uint8Array of
+    //     'ow:id' bytes → TextDecoder → 'ow:id' → lookup ✓
     safeStorage: {
       isEncryptionAvailable() { return true; },
       encryptString(text) {
-        // Encode as a tagged base64 string — survives localStorage serialization
-        const bytes = new TextEncoder().encode(text);
-        const b64 = btoa(String.fromCharCode(...bytes));
-        // Return a string so localStorage.setItem/getItem is lossless
-        return 'OW:' + b64;
+        // Generate a random 18-char hex ID
+        const rnd = new Uint8Array(9);
+        crypto.getRandomValues(rnd);
+        const id = Array.from(rnd).map(b => b.toString(16).padStart(2, '0')).join('');
+        // Persist secret server-side via synchronous XHR
+        try {
+          global.__owSyncJson('PUT', '/api/keytar', {
+            service: '__safeStorage__',
+            account: id,
+            password: text,
+          });
+        } catch (e) {
+          console.warn('[obsidian-web] safeStorage.encryptString: store failed:', e.message);
+        }
+        // Return base64 of 'ow:' + id  — this is a valid base64 string that
+        // decodes back to the marker string whether Obsidian treats it as a
+        // plain string or decodes it as base64 first.
+        const marker = 'ow:' + id;
+        return btoa(String.fromCharCode(...new TextEncoder().encode(marker)));
       },
       decryptString(buf) {
-        // buf may be a string (from localStorage) or Uint8Array (from a file read)
-        let str = typeof buf === 'string' ? buf : new TextDecoder().decode(buf);
-        if (str.startsWith('OW:')) {
+        // Recover the 'ow:id' marker regardless of whether buf arrived as a
+        // plain string (Obsidian stored token as-is) or Uint8Array (Obsidian
+        // did Buffer.from(token, 'base64') before storing).
+        let marker;
+        if (typeof buf !== 'string') {
+          marker = new TextDecoder().decode(buf);
+        } else {
+          try { marker = atob(buf); } catch (_) { marker = buf; }
+        }
+
+        // Current token format: marker = 'ow:' + id
+        if (marker && marker.startsWith('ow:')) {
+          const id = marker.slice(3);
           try {
-            const bin = atob(str.slice(3));
+            const url = '/api/keytar?service=' + encodeURIComponent('__safeStorage__')
+                      + '&account=' + encodeURIComponent(id);
+            const result = global.__owSyncJson('GET', url);
+            if (result && result.password != null) return result.password;
+          } catch (e) {
+            if (!e.status || e.status !== 404) {
+              console.warn('[obsidian-web] safeStorage.decryptString: lookup failed:', e.message);
+            }
+          }
+        }
+
+        // Legacy: old 'OW:' tagged base64 format (previous implementation)
+        const s = typeof buf === 'string' ? buf : new TextDecoder().decode(buf);
+        if (s.startsWith('OW:')) {
+          try {
+            const bin = atob(s.slice(3));
             const bytes = new Uint8Array(bin.length);
             for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
             return new TextDecoder().decode(bytes);
           } catch (_) {}
         }
-        // Legacy: comma-separated numbers from old Uint8Array.toString()
-        if (/^\d+(,\d+)*$/.test(str)) {
-          return new TextDecoder().decode(new Uint8Array(str.split(',').map(Number)));
+
+        // Legacy: old comma-separated numbers from Uint8Array.toString()
+        if (typeof buf === 'string' && /^\d+(,\d+)*$/.test(buf)) {
+          try {
+            return new TextDecoder().decode(new Uint8Array(buf.split(',').map(Number)));
+          } catch (_) {}
         }
-        return str;
+
+        // Last resort: return as-is
+        return s;
       },
     },
     nativeTheme: (function () {
