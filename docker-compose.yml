@@ -13,10 +13,10 @@ services:
 
       # Granular overrides — only needed if you want to share a single
       # plugins/themes/snippets/fonts folder across multiple vaults.
-      - ${OBSIDIAN_PLUGINS:-./user-data/demo-vault/.obsidian/plugins}:/app/user-data/demo-vault/.obsidian/plugins
-      - ${OBSIDIAN_THEMES:-./user-data/demo-vault/.obsidian/themes}:/app/user-data/demo-vault/.obsidian/themes
-      - ${OBSIDIAN_SNIPPETS:-./user-data/demo-vault/.obsidian/snippets}:/app/user-data/demo-vault/.obsidian/snippets
-      - ${OBSIDIAN_FONTS:-./user-data/demo-vault/.obsidian/fonts}:/app/user-data/demo-vault/.obsidian/fonts
+      # - ${OBSIDIAN_PLUGINS:-./user-data/demo-vault/.obsidian/plugins}:/app/user-data/demo-vault/.obsidian/plugins
+      # - ${OBSIDIAN_THEMES:-./user-data/demo-vault/.obsidian/themes}:/app/user-data/demo-vault/.obsidian/themes
+      # - ${OBSIDIAN_SNIPPETS:-./user-data/demo-vault/.obsidian/snippets}:/app/user-data/demo-vault/.obsidian/snippets
+      # - ${OBSIDIAN_FONTS:-./user-data/demo-vault/.obsidian/fonts}:/app/user-data/demo-vault/.obsidian/fonts
 
       # Obsidian renderer bundles (downloaded on first start)
       - obsidian_vendor:/app/vendor
