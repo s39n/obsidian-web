@@ -908,16 +908,14 @@ const OBSIDIAN_SCRIPTS = [
 
           // vault.getResourcePath: Obsidian calls this for every embedded asset
           // (images, audio, video, PDFs). In Electron it returns app://local/...
-          // which browsers can't load. Override it here — before any note is
-          // rendered — so the URL is already an HTTP path when Obsidian sets
-          // it as <img src>. This is more reliable than the MutationObserver
-          // fallback (which fixes src reactively after the browser already
-          // tried and failed to load the app:// URL).
+          // which browsers can't load. Build the URL directly from file.path
+          // (the clean vault-relative path, no protocol prefix, no timestamp)
+          // rather than trying to parse the Electron URL format.
           if (window.app.vault && typeof window.app.vault.getResourcePath === 'function') {
-            var _origGetResourcePath = window.app.vault.getResourcePath.bind(window.app.vault);
             window.app.vault.getResourcePath = function (file) {
-              var original = _origGetResourcePath(file);
-              return _owAssetHref(original) || original;
+              var vaultId = window.__obsidianWeb && window.__obsidianWeb.vaultId;
+              var vaultParam = vaultId ? '&vault=' + encodeURIComponent(vaultId) : '';
+              return '/api/fs/read?path=' + encodeURIComponent((file && file.path) || '') + vaultParam;
             };
           }
 
