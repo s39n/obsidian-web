@@ -777,12 +777,25 @@ const OBSIDIAN_SCRIPTS = [
       if (pollTimer) clearInterval(pollTimer);
     }
 
-    fetch('/api/bootstrap?vault=' + vaultParam + '&full=1')
-      .then(function (res) {
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        return res.json();
-      })
-      .then(function (data) {
+    // Bootstrap cache and the server-backed localStorage load in parallel.
+    // Both must be ready BEFORE Obsidian's scripts are injected: app.js
+    // reads localStorage (safeStorage tokens, app state) synchronously at
+    // startup. A localStorage failure is non-fatal — native storage stays.
+    Promise.all([
+      fetch('/api/bootstrap?vault=' + vaultParam + '&full=1')
+        .then(function (res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.json();
+        }),
+      (window.__owInstallRemoteLocalStorage
+        ? window.__owInstallRemoteLocalStorage()
+        : Promise.resolve()
+      ).catch(function (e) {
+        console.warn('[obsidian-web] remote localStorage unavailable, staying device-local:', e && e.message);
+      }),
+    ])
+      .then(function (results) {
+        var data = results[0];
         stopPolling();
         var vault = data.electron && data.electron['vault'];
         if (!vault || !vault.id) {

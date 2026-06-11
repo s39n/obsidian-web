@@ -292,3 +292,111 @@ test('starter route serves the wrapped Obsidian starter entry', async (t) => {
   assert.equal(response.status, 200);
   assert.match(await response.text(), /starter/);
 });
+
+test('vaultsRoot restricts open to paths under the root', async (t) => {
+  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'obsidian-web-'));
+  t.after(() => fsp.rm(tmp, { recursive: true, force: true }));
+
+  const vaultsRoot = path.join(tmp, 'vaults');
+  const insidePath = path.join(vaultsRoot, 'good-vault');
+  const outsidePath = path.join(tmp, 'evil-vault');
+  await fsp.mkdir(insidePath, { recursive: true });
+  await fsp.mkdir(outsidePath);
+
+  const bootVault = path.join(vaultsRoot, 'boot');
+  await fsp.mkdir(bootVault);
+  const server = await startTestServer({
+    clientPath: path.join(tmp, 'client'),
+    obsidianPath: path.join(tmp, 'obsidian'),
+    registryPath: path.join(tmp, 'vaults.json'),
+    vaultPath: bootVault,
+    vaultsRoot,
+  });
+  t.after(server.close);
+
+  // Inside the root → allowed.
+  const okRes = await fetch(server.baseUrl + '/api/vaults/open', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: insidePath, create: false }),
+  });
+  assert.equal(okRes.status, 200);
+  assert.equal((await okRes.json()).ok, true);
+
+  // Outside the root → rejected, even though the directory exists.
+  const badRes = await fetch(server.baseUrl + '/api/vaults/open', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: outsidePath, create: false }),
+  });
+  assert.equal(badRes.status, 400);
+  const bad = await badRes.json();
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /outside the allowed vaults root/);
+
+  // Path traversal out of the root → rejected.
+  const traversalRes = await fetch(server.baseUrl + '/api/vaults/open', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: path.join(vaultsRoot, '..', 'evil-vault'), create: false }),
+  });
+  assert.equal(traversalRes.status, 400);
+
+  // The configured boot vault is allowed even when it equals the allowlist entry.
+  const bootRes = await fetch(server.baseUrl + '/api/vaults/open', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: bootVault, create: false }),
+  });
+  assert.equal(bootRes.status, 200);
+});
+
+test('localstorage API stores, merges, and deletes keys', async (t) => {
+  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'obsidian-web-'));
+  t.after(() => fsp.rm(tmp, { recursive: true, force: true }));
+
+  const server = await startTestServer({
+    clientPath: path.join(tmp, 'client'),
+    obsidianPath: path.join(tmp, 'obsidian'),
+    registryPath: path.join(tmp, 'vaults.json'),
+    userDataPath: tmp,
+    vaultPath: tmp,
+  });
+  t.after(server.close);
+
+  // Empty store initially.
+  let res = await fetch(server.baseUrl + '/api/localstorage');
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), {});
+
+  // Batch PUT sets keys.
+  res = await fetch(server.baseUrl + '/api/localstorage', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entries: { alpha: '1', beta: 'two' } }),
+  });
+  assert.equal(res.status, 200);
+
+  // Second PUT merges and deletes (null).
+  res = await fetch(server.baseUrl + '/api/localstorage', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entries: { beta: null, gamma: '3' } }),
+  });
+  assert.equal(res.status, 200);
+
+  res = await fetch(server.baseUrl + '/api/localstorage');
+  assert.deepEqual(await res.json(), { alpha: '1', gamma: '3' });
+
+  // Malformed body rejected.
+  res = await fetch(server.baseUrl + '/api/localstorage', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nope: true }),
+  });
+  assert.equal(res.status, 400);
+
+  // Persisted to disk in userDataPath.
+  const onDisk = JSON.parse(await fsp.readFile(path.join(tmp, '.localstorage.json'), 'utf8'));
+  assert.deepEqual(onDisk, { alpha: '1', gamma: '3' });
+});

@@ -23,6 +23,7 @@ const createBootstrapRouter = require('./api/bootstrap');
 const { warmUpBootstrapCache } = require('./api/bootstrap');
 const createProxyRouter = require('./api/proxy');
 const createKeytarRouter = require('./api/keytar');
+const createLocalStorageRouter = require('./api/localstorage');
 const createPbkdf2Router = require('./api/pbkdf2');
 const attachWatchServer = require('./api/watch');
 const VaultRegistry = require('./vault-registry');
@@ -30,7 +31,13 @@ const { createAuthMiddleware } = require('./middleware/auth');
 
 function createApp(appConfig = config) {
   const app = express();
-  const vaultRegistry = new VaultRegistry(appConfig.registryPath);
+  const vaultRegistry = new VaultRegistry(appConfig.registryPath, {
+    // Restrict /api/vaults/open to paths under vaultsRoot (VAULTS_ROOT env,
+    // default user-data/). The configured boot vault is always allowed even
+    // if it lives elsewhere. Tests pass no vaultsRoot → unrestricted.
+    vaultsRoot: appConfig.vaultsRoot,
+    allowPaths: [appConfig.vaultPath],
+  });
 
   // Compression — critical for /api/bootstrap (38MB uncompressed → ~6MB).
   // Brotli gives ~84% reduction, gzip ~79%. The middleware auto-selects based
@@ -40,7 +47,7 @@ function createApp(appConfig = config) {
   // Optional TOTP auth — enabled by setting TOTP_SECRET env var.
   // Generate a secret: node -e "const {authenticator}=require('otplib');console.log(authenticator.generateSecret())"
   // Then visit /__totp-setup?token=YOUR_SECRET to scan the QR code.
-  const authMiddleware = createAuthMiddleware();
+  const authMiddleware = createAuthMiddleware(appConfig);
   if (authMiddleware) {
     app.use(authMiddleware);
     console.log('[auth] TOTP authentication enabled — visit /__totp-setup?token=YOUR_SECRET to configure your authenticator app');
@@ -146,6 +153,7 @@ function createApp(appConfig = config) {
 
   // API routes.
   app.use('/api/keytar', createKeytarRouter(appConfig.userDataPath));
+  app.use('/api/localstorage', createLocalStorageRouter(appConfig.userDataPath));
   app.use('/api/pbkdf2', createPbkdf2Router());
   app.use('/api/bootstrap', createBootstrapRouter(vaultRegistry, appConfig.vaultPath));
   app.use('/api/proxy-request', createProxyRouter());

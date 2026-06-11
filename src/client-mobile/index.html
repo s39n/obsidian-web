@@ -39,6 +39,10 @@
     <div class="ow-status" id="ow-status"></div>
   </div>
 
+  <!-- 0. localStorage שרת-צד (משותף עם הלקוח הדסקטופי) — מותקן ע"י boot.js
+       לפני הזרקת הסקריפטים של Obsidian. -->
+  <script src="/client/shims/remote-localstorage.js?v=1"></script>
+
   <!-- 1. Capacitor shim — חייב לפני native-bridge.js כדי שandroidBridge יהיה
        מוגדר כשהbridge מאתחל את הplatform. -->
   <script src="/client-mobile/shims/capacitor-shim.js?v=1"></script>

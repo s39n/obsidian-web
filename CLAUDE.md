@@ -19,6 +19,8 @@ the server.
 | `src/server/api/fs.js` | File-system REST API (`/api/fs/*`). Includes write coalescing and `mkdirRepair` for ENOTDIR vault corruption. |
 | `src/server/api/pbkdf2.js` | `POST /api/pbkdf2` — offloads PBKDF2 key derivation to Node's native crypto (100k iterations in pure JS would freeze the browser for ~10 s). |
 | `src/server/api/keytar.js` | `safeStorage` shim — stores plugin secrets server-side (Electron's `safeStorage` is unavailable in the browser). |
+| `src/server/api/localstorage.js` | Server-backed `window.localStorage` store (`user-data/.localstorage.json`). Pairs with `src/client/shims/remote-localstorage.js`. |
+| `src/client/shims/remote-localstorage.js` | Replaces `window.localStorage` with the server-backed store before app.js runs, so safeStorage tokens and app state roam across devices/origins. Keys prefixed `obsidian-web:` stay device-local. |
 | `src/server/api/bootstrap.js` | `/api/bootstrap` — serves the entire vault's file tree and metadata in one compressed response so Obsidian's sync `statSync`/`readFileSync` calls hit an in-memory cache. |
 | `src/server/middleware/auth.js` | Optional TOTP authentication middleware. Enabled by setting `TOTP_SECRET`. |
 
@@ -119,3 +121,7 @@ On plain HTTP all of the following must be polyfilled / shimmed:
 - Auth is disabled when `TOTP_SECRET` is empty.
 - Generate a secret: `node -e "const {authenticator}=require('otplib');console.log(authenticator.generateSecret())"`
 - Scan QR code: visit `/__totp-setup?token=YOUR_SECRET` after starting the server.
+- Sessions are random per-login tokens persisted in `user-data/.sessions.json`
+  (7-day expiry). Failed TOTP attempts are rate-limited to 5 per IP per 15 min.
+- `/api/vaults/open` only accepts paths under `VAULTS_ROOT` (default
+  `user-data/`). Set `VAULTS_ROOT=*` to disable the restriction.
