@@ -14,6 +14,8 @@
  */
 
 const crypto        = require('crypto');
+const fs            = require('fs');
+const path          = require('path');
 const { authenticator } = require('otplib');
 const QRCode        = require('qrcode');
 
@@ -24,11 +26,6 @@ const MAX_AGE     = 7 * 24 * 60 * 60; // 7 days
 // Allow 1 step (±30 s) of clock drift between phone and server
 authenticator.options = { window: 1 };
 
-// Session token is derived from the TOTP secret — consistent across restarts
-const SESSION_TOKEN = TOTP_SECRET
-  ? crypto.createHmac('sha256', TOTP_SECRET).update('v1:session').digest('hex')
-  : '';
-
 function parseCookies(req) {
   return Object.fromEntries(
     (req.headers.cookie || '').split(';')
@@ -38,8 +35,109 @@ function parseCookies(req) {
   );
 }
 
-function isAuthenticated(req) {
-  return parseCookies(req)[COOKIE] === SESSION_TOKEN;
+// ── Sessions ───────────────────────────────────────────────────────────────────
+// Random token per successful login (NOT derived from the TOTP secret — a
+// derived token never rotates, so one leaked cookie would be valid forever).
+// Sessions persist to .sessions.json so a server restart doesn't log
+// everyone out; expired entries are pruned on every load/save.
+
+class SessionStore {
+  constructor(file) {
+    this.file = file; // null → in-memory only
+    this.sessions = this.load();
+  }
+
+  load() {
+    if (!this.file) return {};
+    try {
+      const data = JSON.parse(fs.readFileSync(this.file, 'utf8')) || {};
+      const now = Date.now();
+      for (const [token, expires] of Object.entries(data)) {
+        if (typeof expires !== 'number' || expires < now) delete data[token];
+      }
+      return data;
+    } catch (_) {
+      return {};
+    }
+  }
+
+  save() {
+    if (!this.file) return;
+    try {
+      fs.mkdirSync(path.dirname(this.file), { recursive: true });
+      const tmp = this.file + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(this.sessions));
+      fs.renameSync(tmp, this.file);
+    } catch (err) {
+      console.warn('[auth] failed to persist sessions:', err.message);
+    }
+  }
+
+  create() {
+    const token = crypto.randomBytes(32).toString('hex');
+    this.sessions[token] = Date.now() + MAX_AGE * 1000;
+    this.save();
+    return token;
+  }
+
+  has(token) {
+    if (!token) return false;
+    const expires = this.sessions[token];
+    if (!expires) return false;
+    if (expires < Date.now()) {
+      delete this.sessions[token];
+      this.save();
+      return false;
+    }
+    return true;
+  }
+}
+
+// ── Rate limiting ──────────────────────────────────────────────────────────────
+// A 6-digit TOTP with ±1 step drift is brute-forceable without throttling.
+// Allow MAX_ATTEMPTS failed codes per IP per window; successes reset the
+// counter. In-memory: a restart clears it, which only helps the attacker by
+// MAX_ATTEMPTS more guesses — negligible against 10^6 codes.
+
+const MAX_ATTEMPTS = 5;
+const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
+
+class RateLimiter {
+  constructor() {
+    this.attempts = new Map(); // ip → { count, resetAt }
+  }
+
+  clientIp(req) {
+    // Behind cloudflared/reverse proxies the socket address is the proxy;
+    // use the first forwarded hop when present.
+    const fwd = req.headers['x-forwarded-for'];
+    if (fwd) return String(fwd).split(',')[0].trim();
+    return req.socket.remoteAddress || 'unknown';
+  }
+
+  isBlocked(req) {
+    const entry = this.attempts.get(this.clientIp(req));
+    if (!entry) return false;
+    if (Date.now() > entry.resetAt) {
+      this.attempts.delete(this.clientIp(req));
+      return false;
+    }
+    return entry.count >= MAX_ATTEMPTS;
+  }
+
+  recordFailure(req) {
+    const ip = this.clientIp(req);
+    const entry = this.attempts.get(ip);
+    if (!entry || Date.now() > entry.resetAt) {
+      this.attempts.set(ip, { count: 1, resetAt: Date.now() + ATTEMPT_WINDOW_MS });
+    } else {
+      entry.count++;
+    }
+  }
+
+  recordSuccess(req) {
+    this.attempts.delete(this.clientIp(req));
+  }
 }
 
 // ── HTML pages ─────────────────────────────────────────────────────────────────
@@ -201,8 +299,18 @@ async function buildSetupPage(secret) {
 
 // ── Middleware factory ─────────────────────────────────────────────────────────
 
-function createAuthMiddleware() {
+function createAuthMiddleware(appConfig = {}) {
   if (!TOTP_SECRET) return null;
+
+  const sessionsFile = appConfig.userDataPath
+    ? path.join(appConfig.userDataPath, '.sessions.json')
+    : null;
+  const sessions = new SessionStore(sessionsFile);
+  const limiter = new RateLimiter();
+
+  function isAuthenticated(req) {
+    return sessions.has(parseCookies(req)[COOKIE]);
+  }
 
   return async function authMiddleware(req, res, next) {
 
@@ -218,13 +326,25 @@ function createAuthMiddleware() {
 
     // ── Auth endpoint ── verify code, set cookie
     if (req.path === '/__auth') {
+      if (limiter.isBlocked(req)) {
+        return res.status(429)
+          .end('Too many failed attempts — try again in a few minutes.');
+      }
       const code = String(req.query?.code || '').replace(/\D/g, '');
       const dest = req.query?.next || '/';
       if (code.length === 6 && authenticator.verify({ token: code, secret: TOTP_SECRET })) {
+        limiter.recordSuccess(req);
+        const token = sessions.create();
+        // Secure flag when the request arrived over HTTPS (directly or via
+        // a proxy/tunnel like cloudflared). Omitted on plain-HTTP LAN
+        // setups, where it would make the cookie unusable.
+        const secure = (req.secure || req.headers['x-forwarded-proto'] === 'https')
+          ? '; Secure' : '';
         res.setHeader('Set-Cookie',
-          `${COOKIE}=${SESSION_TOKEN}; Path=/; Max-Age=${MAX_AGE}; HttpOnly; SameSite=Strict`);
+          `${COOKIE}=${token}; Path=/; Max-Age=${MAX_AGE}; HttpOnly; SameSite=Strict${secure}`);
         return res.redirect(dest);
       }
+      limiter.recordFailure(req);
       return res.redirect(`/__login?error=1&next=${encodeURIComponent(dest)}`);
     }
 
