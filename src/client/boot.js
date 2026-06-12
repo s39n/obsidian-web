@@ -333,6 +333,17 @@ const OBSIDIAN_SCRIPTS = [
     window.global = window;
   }
 
+  // Register the Service Worker for bootstrap caching (stale-while-revalidate).
+  // On repeat visits the SW intercepts /api/bootstrap and returns a cached
+  // response instantly, then revalidates in the background — no server
+  // round-trip needed. The SW file is served at /sw.js with
+  // Service-Worker-Allowed: / so it can intercept requests on the full origin.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(err => {
+      console.warn('[obsidian-web] service worker registration failed:', err.message);
+    });
+  }
+
   const VAULT_BASE = '/vault';
   const params = new URLSearchParams(location.search);
   let VAULT_ID = params.get('vault') || localStorage.getItem('obsidian-web:lastVaultId') || '';
