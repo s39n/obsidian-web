@@ -425,16 +425,28 @@ function createBootstrapRouter(vaultRegistry, fallbackVaultRoot) {
     const vault = vaultId ? vaultRegistry.get(vaultId) : null;
     const vaultRoot = vault ? vault.path : fallbackVaultRoot;
 
-    // If a full=1 build is needed but we only have a partial cache, serve
-    // the partial result immediately and kick off the full build in the background.
+    // Stale-while-revalidate: if ANY cached entry exists, serve it immediately
+    // and rebuild in the background. This prevents the browser from blocking on
+    // a full vault rescan (which can take 30-60s for large vaults) when the
+    // cache was merely invalidated by a dir mtime change (e.g. ion-sync activity).
+    //
+    // Only block on a true cold start (no entry at all). On the next request
+    // after the background build finishes, the client will get fresh data.
     const existing = serverCache.get(vaultId);
     let entry;
-    if (full && existing && !existing.isFull) {
-      console.log(`[bootstrap] vault=${vaultId.slice(0, 8)}… serving partial while full build runs in background`);
-      buildCacheEntry(vaultId, vaultRoot, vaultRegistry, true)
-        .catch((err) => console.warn('[bootstrap] background full build error:', err.message));
+    if (existing) {
+      const needsFull = full && !existing.isFull;
+      if (needsFull) {
+        console.log(`[bootstrap] vault=${vaultId.slice(0, 8)}… serving partial/stale while full build runs in background`);
+      } else {
+        console.log(`[bootstrap] vault=${vaultId.slice(0, 8)}… serving stale-while-revalidate`);
+      }
+      // Fire background refresh (deduplicated via pendingBuilds — no-op if already running).
+      buildCacheEntry(vaultId, vaultRoot, vaultRegistry, full)
+        .catch((err) => console.warn('[bootstrap] background revalidation error:', err.message));
       entry = existing;
     } else {
+      // Cold start — no cached entry at all. Must wait for the initial build.
       entry = await buildCacheEntry(vaultId, vaultRoot, vaultRegistry, full);
     }
 
