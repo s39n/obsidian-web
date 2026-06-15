@@ -191,4 +191,22 @@ function startServer(appConfig = config) {
     console.log('==========================================');
     console.log('  Vault:    ' + appConfig.vaultPath);
     console.log('  Obsidian: ' + appConfig.obsidianPath);
-    console.log('  
+    console.log('  Listening on http://' + appConfig.host + ':' + appConfig.port);
+    console.log('==========================================');
+
+    // Pre-build the bootstrap cache in the background so the first browser
+    // request is a cache HIT instead of a cold build.
+    setImmediate(() => {
+      warmUpBootstrapCache(app.locals.vaultRegistry, appConfig.vaultPath)
+        .catch((err) => console.warn('[bootstrap] warm-up error:', err.message));
+    });
+  });
+
+  return server;
+}
+
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = { createApp, startServer };
