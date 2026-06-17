@@ -200,6 +200,26 @@ function startServer(appConfig = config) {
       warmUpBootstrapCache(app.locals.vaultRegistry, appConfig.vaultPath)
         .catch((err) => console.warn('[bootstrap] warm-up error:', err.message));
     });
+
+    // Notify-only Obsidian update check. Runs in the background so it never
+    // blocks boot, and only logs -- applying an update stays a manual step
+    // (node scripts/update-obsidian.js). Disable with OBSIDIAN_UPDATE_CHECK=false.
+    setImmediate(() => {
+      let checkObsidianVersion;
+      let formatNotice;
+      try {
+        ({ checkObsidianVersion, formatNotice } = require('../../scripts/check-obsidian-version'));
+      } catch (_) {
+        return; // scripts/ not present (e.g. trimmed deployment) -- skip silently.
+      }
+      checkObsidianVersion()
+        .then((result) => {
+          // Log on every successful check (update available or up to date);
+          // stay silent when not checkable (offline/disabled) to avoid noise.
+          if (result.checked) console.log(formatNotice(result));
+        })
+        .catch((err) => console.warn('[update-check] error:', err.message));
+    });
   });
 
   return server;
