@@ -149,6 +149,32 @@ node scripts/update-obsidian.js --no-cache
 
 The updater uses the official `obsidian-<version>.asar.gz` release asset, verifies the SHA-256 digest when GitHub provides one, extracts it locally, validates required renderer files, then replaces `obsidian/`.
 
+### Update notifications (auto-check, notify-only)
+
+The server checks for a newer Obsidian release at startup and logs a notice when one is available. It never downloads or applies the update on its own; applying stays the deliberate `node scripts/update-obsidian.js` step above. This keeps you in control of when the renderer changes while still telling you when you are behind.
+
+You can also run the check on demand:
+
+```bash
+# human-readable status (exit 10 if an update is available, 0 otherwise)
+node scripts/check-obsidian-version.js
+
+# machine-readable output for scripts/cron
+node scripts/check-obsidian-version.js --json
+```
+
+The installed version is read from `vendor/obsidian/package.json` (falling back to the server's configured `APP_VERSION`), and compared against the latest tag on `obsidianmd/obsidian-releases`.
+
+Relevant environment variables:
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `OBSIDIAN_UPDATE_CHECK` | enabled | Set to `false`/`0`/`off` to disable the startup network check entirely. |
+| `OBSIDIAN_VERSION` | _(unset)_ | Pin to a version (e.g. `1.12.7`). The check then compares against the pin instead of GitHub's latest, and the check needs no network. |
+| `OBSIDIAN_CHECK_TIMEOUT` | `5000` | Timeout (ms) for the GitHub request. |
+
+The check is non-blocking and offline-safe: if GitHub is unreachable it stays silent rather than failing boot.
+
 ### Mobile bundle (`vendor/obsidian-mobile/`)
 
 The project ships **two runtimes** — a desktop one at `/` and a mobile one at `/mobile`. The mobile runtime needs the Obsidian Android APK bundle, extracted into `vendor/obsidian-mobile/`. Like `vendor/obsidian/`, this directory is gitignored and downloaded on demand:
@@ -246,24 +272,4 @@ The Node.js server (`src/server/`) can be deployed to any Linux box. A typical s
 1. Clone the repo and run `node scripts/update-obsidian.js` to get Obsidian's renderer files
 2. `cd src/server && npm install && npm start`
 3. Put it behind a reverse proxy (nginx, Caddy, Cloudflare Tunnel) with HTTPS
-4. Do not expose the server directly to the internet without auth — there is no application-level authentication
-
-## Notes
-
-- Obsidian's extracted files are treated as third-party artifacts. Do not edit files under `vendor/obsidian/` or `vendor/obsidian-mobile/`; update wrappers/shims instead.
-- The default vault is `user-data/demo-vault/`.
-- The current starter folder picker is prompt-based: enter an absolute server path.
-- Do not bind the server to a public IP without a tunnel or auth layer in front.
-- Current architecture and roadmap are in `PLAN.md`.
-
-## Disclaimer
-
-This is an **educational proof-of-concept** exploring how Electron-based apps can run in a standard browser. It is not affiliated with, endorsed by, or associated with [Obsidian](https://obsidian.md) or Dynalist Inc.
-
-This repository does **not** include Obsidian's source code. The `vendor/obsidian/` and `vendor/obsidian-mobile/` directories are gitignored — users must download Obsidian's renderer themselves using the provided setup scripts. Obsidian's code remains the property of Dynalist Inc. under their [Terms of Service](https://obsidian.md/terms).
-
-If the Obsidian team has any concerns about this project, please [open an issue](https://github.com/MusiCode1/obsidian-web/issues) and we will address them promptly.
-
-## Credits
-
-Built by [MusiCode1](https://github.com/MusiCode1) and [Claude Code](https://claude.ai/code).
+4. Do not
