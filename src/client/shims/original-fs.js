@@ -58,10 +58,23 @@
 
   function invalidateBootstrap(p) {
     const cache = global.__owBootstrapCache;
-    if (cache && cache.fs) delete cache.fs[toRelative(p)];
-    // Also invalidate parent dir listing so readdir re-fetches.
+    const rel = toRelative(p);
+    const prefix = rel + '/';
+    if (cache && cache.fs) {
+      // Evict the entry itself plus any descendants (covers folder deletes,
+      // where children would otherwise linger in cache and reappear).
+      delete cache.fs[rel];
+      for (const key of Object.keys(cache.fs)) {
+        if (key.startsWith(prefix)) delete cache.fs[key];
+      }
+    }
     if (cache && cache.dirs) {
-      const rel = toRelative(p);
+      // Evict the path's own listing (if it was a directory) and its
+      // descendants' listings, plus the parent listing so readdir re-fetches.
+      delete cache.dirs[rel];
+      for (const key of Object.keys(cache.dirs)) {
+        if (key.startsWith(prefix)) delete cache.dirs[key];
+      }
       const parent = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '';
       delete cache.dirs[parent];
     }
@@ -307,6 +320,7 @@
 
   function rmdirAsync(p, opts, cb) {
     if (typeof opts === 'function') { cb = opts; opts = {}; }
+    invalidateBootstrap(p);
     const recursive = opts && opts.recursive ? '1' : '0';
     fetch('/api/fs/rmdir?' + vaultQuery() + 'path=' + encodePath(p) + '&recursive=' + recursive, { method: 'DELETE' })
       .then(async (r) => {
