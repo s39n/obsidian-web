@@ -80,6 +80,41 @@
     }
   }
 
+  // Like invalidateBootstrap, but for DELETIONS specifically. Instead of
+  // dropping the parent's cached listing (which forces a re-fetch and leaves a
+  // window where a stale listing can be re-read), it SPLICES the removed entry
+  // out of the parent listing in place. This keeps the listing valid and — most
+  // importantly — prevents populateStatFromDir() from resurrecting the deleted
+  // path into fs cache from a stale parent entry, which caused deleted folders
+  // to reappear in the file explorer until a full reload.
+  function removeFromBootstrap(p) {
+    const cache = global.__owBootstrapCache;
+    if (!cache) return;
+    const rel = toRelative(p);
+    const prefix = rel + '/';
+    if (cache.fs) {
+      delete cache.fs[rel];
+      for (const key of Object.keys(cache.fs)) {
+        if (key.startsWith(prefix)) delete cache.fs[key];
+      }
+    }
+    if (cache.dirs) {
+      // Drop the deleted path's own listing and any descendant listings.
+      delete cache.dirs[rel];
+      for (const key of Object.keys(cache.dirs)) {
+        if (key.startsWith(prefix)) delete cache.dirs[key];
+      }
+      // Splice the entry out of the parent listing in place (keeps it valid).
+      const parent = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '';
+      const name = rel.includes('/') ? rel.slice(rel.lastIndexOf('/') + 1) : rel;
+      const listing = cache.dirs[parent];
+      if (Array.isArray(listing)) {
+        const idx = listing.findIndex((e) => e.name === name);
+        if (idx !== -1) listing.splice(idx, 1);
+      }
+    }
+  }
+
   function makeStatsFromCache(entry) {
     const isDir = !!entry.isDirectory;
     return makeStats({
@@ -288,7 +323,7 @@
   }
 
   function unlinkAsync(p, cb) {
-    invalidateBootstrap(p);
+    removeFromBootstrap(p);
     fetch('/api/fs/unlink?' + vaultQuery() + 'path=' + encodePath(p), { method: 'DELETE' })
       .then(async (r) => {
         if (!r.ok) {
@@ -301,7 +336,9 @@
   }
 
   function renameAsync(oldPath, newPath, cb) {
-    invalidateBootstrap(oldPath);
+    // Source disappears (splice it out of its parent listing); destination is a
+    // new entry, so invalidate its parent listing to force a re-fetch.
+    removeFromBootstrap(oldPath);
     invalidateBootstrap(newPath);
     fetch('/api/fs/rename', {
       method: 'POST',
@@ -320,7 +357,7 @@
 
   function rmdirAsync(p, opts, cb) {
     if (typeof opts === 'function') { cb = opts; opts = {}; }
-    invalidateBootstrap(p);
+    removeFromBootstrap(p);
     const recursive = opts && opts.recursive ? '1' : '0';
     fetch('/api/fs/rmdir?' + vaultQuery() + 'path=' + encodePath(p) + '&recursive=' + recursive, { method: 'DELETE' })
       .then(async (r) => {
@@ -401,7 +438,7 @@
   }
 
   function unlinkSync(p) {
-    invalidateBootstrap(p);
+    removeFromBootstrap(p);
     global.__owSyncRequest('DELETE', '/api/fs/unlink?' + vaultQuery() + 'path=' + encodePath(p));
   }
 
@@ -491,13 +528,17 @@
       // Invalidate bootstrap cache for the changed path.
       // 'change' = content update: only evict the file from fs cache.
       //   Do NOT evict the parent dir listing — the file still exists there.
-      // Structural events (add/unlink/addDir/unlinkDir/rename/reset): evict
-      //   both the file and its parent dir listing so readdir re-fetches.
+      // Deletions (unlink/unlinkDir): splice the entry out of its parent
+      //   listing so a stale listing can't resurrect it via populateStatFromDir.
+      // Other structural events (add/addDir/rename/reset): drop the parent
+      //   listing so readdir re-fetches and picks up the new entry.
       if (msg.path) {
         const absPath = vaultBase + '/' + msg.path;
         if (msg.type === 'change') {
           const cache = global.__owBootstrapCache;
           if (cache && cache.fs) delete cache.fs[toRelative(absPath)];
+        } else if (msg.type === 'unlink' || msg.type === 'unlinkDir') {
+          removeFromBootstrap(absPath);
         } else {
           invalidateBootstrap(absPath);
         }
