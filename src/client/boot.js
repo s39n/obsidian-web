@@ -29,6 +29,55 @@ if (typeof crypto !== 'undefined' && !crypto.randomUUID) {
   };
 }
 
+// Polyfill navigator.clipboard for non-secure contexts (plain HTTP on LAN).
+// Browsers expose the async Clipboard API only in secure contexts (HTTPS or
+// localhost); on plain HTTP `navigator.clipboard` is undefined. Obsidian's
+// code-block "copy" button and the electron clipboard shim both call
+// navigator.clipboard.writeText, so without this they silently no-op. The
+// fallback uses the legacy document.execCommand('copy') path via a temporary
+// off-screen textarea, which works on plain HTTP.
+(function () {
+  function _legacyWriteText(text) {
+    return new Promise(function (resolve, reject) {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text == null ? '' : String(text);
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.top = '-9999px';
+        ta.style.left = '-9999px';
+        ta.style.opacity = '0';
+        var active = document.activeElement;
+        document.body.appendChild(ta);
+        ta.select();
+        ta.setSelectionRange(0, ta.value.length);
+        var ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        if (active && typeof active.focus === 'function') active.focus();
+        if (ok) resolve();
+        else reject(new Error('[polyfill] navigator.clipboard.writeText: execCommand("copy") failed'));
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
+
+  // execCommand('paste') is blocked in browsers, so a reliable read is not
+  // possible on plain HTTP. Resolve empty so callers awaiting readText() don't throw.
+  function _legacyReadText() { return Promise.resolve(''); }
+
+  if (typeof navigator !== 'undefined' && !navigator.clipboard) {
+    try {
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: _legacyWriteText, readText: _legacyReadText },
+        configurable: true,
+      });
+    } catch (_) { /* non-configurable on some engines; ignore */ }
+  } else if (typeof navigator !== 'undefined' && navigator.clipboard && !navigator.clipboard.writeText) {
+    try { navigator.clipboard.writeText = _legacyWriteText; } catch (_) {}
+  }
+})();
+
 // Polyfill crypto.subtle for non-secure contexts (plain HTTP on LAN).
 // Browsers only expose SubtleCrypto on HTTPS/localhost. Plugins like ion-sync
 // call digest / importKey / deriveKey / encrypt / decrypt — without this they
