@@ -272,4 +272,24 @@ The Node.js server (`src/server/`) can be deployed to any Linux box. A typical s
 1. Clone the repo and run `node scripts/update-obsidian.js` to get Obsidian's renderer files
 2. `cd src/server && npm install && npm start`
 3. Put it behind a reverse proxy (nginx, Caddy, Cloudflare Tunnel) with HTTPS
-4. Do not
+4. Do not expose the server directly to the internet without auth — there is no application-level authentication
+
+## Notes
+
+- Obsidian's extracted files are treated as third-party artifacts. Do not edit files under `vendor/obsidian/` or `vendor/obsidian-mobile/`; update wrappers/shims instead.
+- The default vault is `user-data/demo-vault/`.
+- The current starter folder picker is prompt-based: enter an absolute server path.
+- Do not bind the server to a public IP without a tunnel or auth layer in front.
+- Current architecture and roadmap are in `PLAN.md`.
+
+## Disclaimer
+
+This is an **educational proof-of-concept** exploring how Electron-based apps can run in a standard browser. It is not affiliated with, endorsed by, or associated with [Obsidian](https://obsidian.md) or Dynalist Inc.
+
+This repository does **not** include Obsidian's source code. The `vendor/obsidian/` and `vendor/obsidian-mobile/` directories are gitignored — users must download Obsidian's renderer themselves using the provided setup scripts. Obsidian's code remains the property of Dynalist Inc. under their [Terms of Service](https://obsidian.md/terms).
+
+If the Obsidian team has any concerns about this project, please [open an issue](https://github.com/MusiCode1/obsidian-web/issues) and we will address them promptly.
+
+## Credits
+
+Built by [MusiCode1](https://github.com/MusiCode1) and [Claude Code](https://claude.ai/code).
