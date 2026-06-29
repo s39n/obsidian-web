@@ -29,13 +29,21 @@ if (typeof crypto !== 'undefined' && !crypto.randomUUID) {
   };
 }
 
-// Polyfill navigator.clipboard for non-secure contexts (plain HTTP on LAN).
-// Browsers expose the async Clipboard API only in secure contexts (HTTPS or
-// localhost); on plain HTTP `navigator.clipboard` is undefined. Obsidian's
-// code-block "copy" button and the electron clipboard shim both call
-// navigator.clipboard.writeText, so without this they silently no-op. The
-// fallback uses the legacy document.execCommand('copy') path via a temporary
-// off-screen textarea, which works on plain HTTP.
+// Clipboard shim for non-secure contexts + Electron-shim recursion guard.
+//
+// Two problems show up on plain HTTP (LAN/NAS):
+//   1. navigator.clipboard is undefined outside secure contexts.
+//   2. Obsidian's app.js patches navigator.clipboard.writeText to delegate to
+//      the Electron clipboard (electron.js), while our Electron clipboard shim
+//      historically delegated back to navigator.clipboard.writeText — an
+//      infinite recursion ('Maximum call stack size exceeded') the moment the
+//      code-block copy button is pressed.
+//
+// Fix: capture a non-recursive clipboard implementation HERE, before app.js
+// runs and patches navigator.clipboard. On HTTPS we bind the genuine native
+// methods; on plain HTTP we fall back to document.execCommand('copy'). The
+// Electron shim calls these globals (window.__owClipboard*) instead of
+// navigator.clipboard, so the delegation cycle can never form.
 (function () {
   function _legacyWriteText(text) {
     return new Promise(function (resolve, reject) {
@@ -55,7 +63,7 @@ if (typeof crypto !== 'undefined' && !crypto.randomUUID) {
         document.body.removeChild(ta);
         if (active && typeof active.focus === 'function') active.focus();
         if (ok) resolve();
-        else reject(new Error('[polyfill] navigator.clipboard.writeText: execCommand("copy") failed'));
+        else reject(new Error('[polyfill] clipboard writeText: execCommand("copy") failed'));
       } catch (e) {
         reject(e);
       }
@@ -63,18 +71,35 @@ if (typeof crypto !== 'undefined' && !crypto.randomUUID) {
   }
 
   // execCommand('paste') is blocked in browsers, so a reliable read is not
-  // possible on plain HTTP. Resolve empty so callers awaiting readText() don't throw.
+  // possible on plain HTTP. Resolve empty so awaiting callers don't throw.
   function _legacyReadText() { return Promise.resolve(''); }
 
-  if (typeof navigator !== 'undefined' && !navigator.clipboard) {
+  // Capture the genuine native methods now, before app.js can replace them.
+  // Binding to navigator.clipboard guarantees these never route through a
+  // later monkey-patch (the source of the recursion).
+  var _nav = typeof navigator !== 'undefined' ? navigator : null;
+  var _hasNative = _nav && _nav.clipboard;
+  var _nativeWrite = _hasNative && typeof _nav.clipboard.writeText === 'function'
+    ? _nav.clipboard.writeText.bind(_nav.clipboard) : null;
+  var _nativeRead = _hasNative && typeof _nav.clipboard.readText === 'function'
+    ? _nav.clipboard.readText.bind(_nav.clipboard) : null;
+
+  // Stable, non-recursive entry points used by electron.js's clipboard shim.
+  window.__owClipboardWriteText = function (text) {
+    return _nativeWrite ? _nativeWrite(text) : _legacyWriteText(text);
+  };
+  window.__owClipboardReadText = function () {
+    return _nativeRead ? _nativeRead() : _legacyReadText();
+  };
+
+  // Install navigator.clipboard for direct callers (plugins) when it's absent.
+  if (_nav && !_nav.clipboard) {
     try {
-      Object.defineProperty(navigator, 'clipboard', {
-        value: { writeText: _legacyWriteText, readText: _legacyReadText },
+      Object.defineProperty(_nav, 'clipboard', {
+        value: { writeText: window.__owClipboardWriteText, readText: window.__owClipboardReadText },
         configurable: true,
       });
     } catch (_) { /* non-configurable on some engines; ignore */ }
-  } else if (typeof navigator !== 'undefined' && navigator.clipboard && !navigator.clipboard.writeText) {
-    try { navigator.clipboard.writeText = _legacyWriteText; } catch (_) {}
   }
 })();
 

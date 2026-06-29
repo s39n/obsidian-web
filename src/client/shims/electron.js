@@ -668,8 +668,15 @@
     getCurrentWebContents: () => webContentsInstance,
     BrowserWindow: function () { return makeWindow(); },
     clipboard: {
-      writeText: (text) => navigator.clipboard.writeText(text),
-      readText: () => navigator.clipboard.readText(),
+      // Use the non-recursive entry points installed by boot.js. Calling
+      // navigator.clipboard.writeText here would recurse: Obsidian patches
+      // navigator.clipboard.writeText to delegate back into this shim.
+      writeText: (text) => (window.__owClipboardWriteText
+        ? window.__owClipboardWriteText(text)
+        : Promise.resolve()),
+      readText: () => (window.__owClipboardReadText
+        ? window.__owClipboardReadText()
+        : Promise.resolve('')),
       // Returns the image that was most recently pasted (captured via the DOM
       // paste event above). Clears the cache so a subsequent text paste doesn't
       // accidentally return a stale image.
