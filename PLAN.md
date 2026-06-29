@@ -284,7 +284,7 @@ read should be in `server/config.js` for consistency with other settings.
 
 ### Direct-fetch implementation checklist
 
-- [ ] `capacitor-shim.js`: replace `App.requestUrl: () => Promise.resolve({})` with a real fetch wrapper.
+- [x] `capacitor-shim.js`: replace `App.requestUrl: () => Promise.resolve({})` with a real fetch wrapper.
 - [ ] Self-test with `app.requestUrl({ url: 'https://example.com', method: 'GET' })` from DevTools.
 - [ ] Install LiveSync into `test-vault/.obsidian/plugins/obsidian-livesync/` (manual; will graduate to system plugin once stable).
 - [ ] Verify initial replication with a small CouchDB on Fly.io or local.

@@ -35,11 +35,11 @@
  *   Noop stubs (return success, do nothing — irrelevant on web):
  *     SplashScreen, StatusBar, Keyboard, KeepAwake, Haptics, RateApp
  *
- *   TODO / known limitations:
- *     App.requestUrl — currently returns {}. Needs a real fetch() impl
- *                      for LiveSync support (depends on target CORS).
- *                      See PLAN.md → "Updated approach (2026-05-11): direct
- *                      fetch + CORS".
+ *   Implemented via direct fetch (see PLAN.md §2026-05-11):
+ *     App.requestUrl — real fetch() wrapper returning
+ *                      { status, headers, arrayBuffer, text, json }. Enables
+ *                      LiveSync's outbound HTTP. Requires the target (e.g.
+ *                      CouchDB) to send permissive CORS headers for this origin.
  *
  * Vault path: read from localStorage / URL params (same mechanism as desktop).
  * All FS calls get ?vault=<id> query param so the server routes to the right vault.
@@ -448,7 +448,42 @@
     getFonts:             () => Promise.resolve({ fonts: [] }),
     takeScreenshot:       () => Promise.resolve({ base64String: '' }),
     isInstalledFromStore: () => Promise.resolve({ isFromStore: false }),
-    requestUrl:           () => Promise.resolve({}),
+    // requestUrl: real fetch() wrapper (direct fetch + CORS approach — see
+    // PLAN.md §2026-05-11). Used by community plugins (LiveSync) for outbound
+    // HTTP that bypasses Obsidian's own request layer. Returns the shape
+    // Obsidian's requestUrl exposes: { status, headers, arrayBuffer, text, json }.
+    // Mirrors Obsidian's contract: throws on HTTP >= 400 unless { throw: false }.
+    // Subject to browser CORS — CouchDB must send permissive CORS headers.
+    requestUrl: (options) => {
+      const opts = options || {};
+      const url = opts.url;
+      if (!url) return Promise.reject(new Error('[capacitor-shim] App.requestUrl: missing url'));
+      const method = (opts.method || 'GET').toUpperCase();
+      const headers = Object.assign({}, opts.headers || {});
+      if (opts.contentType && !('Content-Type' in headers) && !('content-type' in headers)) {
+        headers['Content-Type'] = opts.contentType;
+      }
+      const init = { method, headers };
+      if (opts.body != null && method !== 'GET' && method !== 'HEAD') {
+        init.body = opts.body instanceof ArrayBuffer ? new Uint8Array(opts.body) : opts.body;
+      }
+      return fetch(url, init).then((res) =>
+        res.arrayBuffer().then((buf) => {
+          const respHeaders = {};
+          res.headers.forEach((v, k) => { respHeaders[k] = v; });
+          let text = '';
+          try { text = new TextDecoder('utf-8').decode(buf); } catch (_) {}
+          let json;
+          try { json = JSON.parse(text); } catch (_) { /* not JSON */ }
+          if (opts.throw !== false && res.status >= 400) {
+            const e = new Error('Request failed, status ' + res.status);
+            e.status = res.status; e.headers = respHeaders;
+            throw e;
+          }
+          return { status: res.status, headers: respHeaders, arrayBuffer: buf, text, json };
+        })
+      );
+    },
     setBackgroundColor:   noop,
   };
 
