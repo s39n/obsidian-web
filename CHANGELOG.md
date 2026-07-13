@@ -17,3 +17,15 @@ based on [Keep a Changelog](https://keepachangelog.com/).
 - Environment variables `OBSIDIAN_UPDATE_CHECK` (disable the check),
   `OBSIDIAN_VERSION` (pin a version / compare without network), and
   `OBSIDIAN_CHECK_TIMEOUT` (GitHub request timeout). See README.
+
+### Fixed
+- **Boot crash from plugins that use Capacitor's App plugin.** Community
+  plugins bundling `@capacitor/app` (e.g. **Homepage**) call
+  `Capacitor.Plugins.App.getLaunchUrl()` at startup. In the browser there is no
+  native `App` plugin, so the call threw
+  `Cannot read properties of undefined (reading 'getLaunchUrl')` and Obsidian's
+  loader showed "An error occurred while loading Obsidian" — the whole app
+  failed to boot. `src/client/boot.js` now installs a defensive Capacitor `App`
+  shim (via a `window.Capacitor` assignment interceptor) so such plugins
+  degrade gracefully instead of crashing boot. (2026-07-13)
+

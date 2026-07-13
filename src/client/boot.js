@@ -29,6 +29,71 @@ if (typeof crypto !== 'undefined' && !crypto.randomUUID) {
   };
 }
 
+// Capacitor App-plugin shim (desktop web client).
+//
+// Some community plugins bundle @capacitor/app and, on startup, call
+// `Capacitor.Plugins.App.getLaunchUrl()` to detect whether Obsidian was opened
+// via an `obsidian://` deeplink (e.g. the Homepage plugin's
+// `hasUrlParams()` -> `runOpeningBehavior()`). In the browser, @capacitor/core
+// initialises with platform "web" and NO native `App` plugin registered, so
+// `Capacitor.Plugins.App` is `undefined`. The call then throws
+//   TypeError: Cannot read properties of undefined (reading 'getLaunchUrl')
+// which Obsidian's loader catches and turns into the "An error occurred while
+// loading Obsidian" crash screen -- the whole app fails to boot over one plugin.
+//
+// The mobile client already installs a full Capacitor shim
+// (src/client-mobile/shims/capacitor-shim.js); the desktop client had none.
+// Here we install a minimal, defensive `App` stub so any such plugin degrades
+// gracefully instead of crashing the app.
+//
+// `window.Capacitor` does not exist yet at boot time -- it is created later by
+// the plugin's own @capacitor/core bundle via `win.Capacitor = createCapacitor(win)`.
+// We therefore intercept assignment to `window.Capacitor` with a setter that
+// (re)injects `Plugins.App` the moment Capacitor is (re)built, and also patch
+// any Capacitor that somehow already exists. @capacitor/core preserves an
+// existing `cap.Plugins`, and nothing registers a real `App`, so our stub
+// survives and is what plugins read.
+(function () {
+  var appStub = {
+    getLaunchUrl:       function () { return Promise.resolve({ url: undefined }); },
+    getInfo:            function () { return Promise.resolve({ name: 'Obsidian', id: 'md.obsidian', build: '0', version: '0.0.0' }); },
+    getState:           function () { return Promise.resolve({ isActive: true }); },
+    addListener:        function () { return Promise.resolve({ remove: function () {} }); },
+    removeAllListeners: function () { return Promise.resolve(); },
+    exitApp:            function () { return Promise.resolve(); },
+    minimizeApp:        function () { return Promise.resolve(); },
+  };
+
+  function ensureApp(cap) {
+    if (!cap) return cap;
+    try {
+      if (!cap.Plugins) cap.Plugins = {};
+      if (!cap.Plugins.App) {
+        cap.Plugins.App = appStub;
+      } else if (typeof cap.Plugins.App.getLaunchUrl !== 'function') {
+        cap.Plugins.App.getLaunchUrl = appStub.getLaunchUrl;
+      }
+    } catch (e) {
+      console.warn('[obsidian-web] Capacitor App shim: could not patch Plugins.App:', e && e.message);
+    }
+    return cap;
+  }
+
+  try {
+    var current = ensureApp(window.Capacitor);
+    Object.defineProperty(window, 'Capacitor', {
+      configurable: true,
+      get: function () { return current; },
+      set: function (v) { current = v ? ensureApp(v) : v; },
+    });
+  } catch (e) {
+    // If Capacitor is a non-configurable own property (shouldn't happen at
+    // boot), fall back to patching whatever is there right now.
+    ensureApp(window.Capacitor);
+    console.warn('[obsidian-web] Capacitor App shim: defineProperty failed, patched in place:', e && e.message);
+  }
+})();
+
 // Clipboard shim for non-secure contexts + Electron-shim recursion guard.
 //
 // Two problems show up on plain HTTP (LAN/NAS):

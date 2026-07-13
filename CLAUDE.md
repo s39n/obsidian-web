@@ -12,7 +12,7 @@ the server.
 
 | Path | Role |
 |------|------|
-| `src/client/boot.js` | Runs first. Installs polyfills (`crypto.subtle`, `crypto.randomUUID`), then fetches the bootstrap cache and injects Obsidian's scripts. |
+| `src/client/boot.js` | Runs first. Installs polyfills (`crypto.subtle`, `crypto.randomUUID`), a defensive Capacitor `App` shim (so plugins calling `App.getLaunchUrl()` don't crash boot), then fetches the bootstrap cache and injects Obsidian's scripts. |
 | `src/client/shims/original-fs.js` | Replaces Node's `fs` module. Async ops use `fetch`; sync ops use synchronous XHR via `__owSyncRequest`. |
 | `src/client/shims/sync-http.js` | Implements `__owSyncRequest` / `__owSyncJson` using synchronous `XMLHttpRequest`. |
 | `src/server/index.js` | Express + HTTP server. Registers all API routers. |
@@ -84,6 +84,28 @@ even when the wildcard `*/*` is specified, so the body is left unparsed and
 **Fix:** `writeFileAsync` and `syncRequest` always set
 `Content-Type: application/octet-stream` on PUT requests so body-parser
 always parses.
+
+## Capacitor App-plugin shim (`src/client/boot.js`)
+
+Some community plugins bundle `@capacitor/app` and call
+`Capacitor.Plugins.App.getLaunchUrl()` at startup to detect an `obsidian://`
+deeplink (e.g. the **Homepage** plugin's `hasUrlParams()` →
+`runOpeningBehavior()`). In the browser, `@capacitor/core` initialises with
+platform `"web"` and no native `App` plugin, so `Capacitor.Plugins.App` is
+`undefined`, the call throws
+`TypeError: Cannot read properties of undefined (reading 'getLaunchUrl')`, and
+Obsidian's loader turns it into the "An error occurred while loading Obsidian"
+crash screen — one plugin takes down the whole boot.
+
+`boot.js` installs a minimal defensive `App` stub (`getLaunchUrl` resolves to
+`{ url: undefined }`, plus noop `getInfo`/`getState`/`addListener`/… ). Because
+`window.Capacitor` doesn't exist at boot (the plugin's own `@capacitor/core`
+bundle creates it later via `win.Capacitor = createCapacitor(win)`), the shim
+intercepts assignment to `window.Capacitor` with a setter that (re)injects
+`Plugins.App` the moment Capacitor is built. `@capacitor/core` preserves an
+existing `cap.Plugins`, and nothing registers a real `App`, so the stub is what
+plugins read. The mobile client's fuller equivalent lives in
+`src/client-mobile/shims/capacitor-shim.js`.
 
 ## ENOTDIR self-repair (`src/server/api/fs.js` — `mkdirRepair`)
 
