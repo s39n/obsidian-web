@@ -55,7 +55,12 @@ if (typeof crypto !== 'undefined' && !crypto.randomUUID) {
 // survives and is what plugins read.
 (function () {
   var appStub = {
-    getLaunchUrl:       function () { return Promise.resolve({ url: undefined }); },
+    // Return a valid, param-free URL (not { url: undefined }) so plugins that
+    // do `new URL((await App.getLaunchUrl()).url)` without guarding — e.g. the
+    // Homepage plugin's hasUrlParams() — don't throw "Invalid URL", while its
+    // launch-param check (openMode/mode/view) still finds nothing and opens the
+    // configured homepage normally.
+    getLaunchUrl:       function () { return Promise.resolve({ url: (typeof location !== 'undefined' ? (location.origin + location.pathname) : 'app://obsidian.md/') }); },
     getInfo:            function () { return Promise.resolve({ name: 'Obsidian', id: 'md.obsidian', build: '0', version: '0.0.0' }); },
     getState:           function () { return Promise.resolve({ isActive: true }); },
     addListener:        function () { return Promise.resolve({ remove: function () {} }); },
