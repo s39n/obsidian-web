@@ -49,7 +49,7 @@ export function buildBootstrap(vault) {
     'vault-list':     { demo: { path: '/vault', ts: Date.now(), open: true } },
     'is-dev':         false,
     'version':        APP_VERSION,
-    'frame':          'hidden',
+    'frame':          'native',
     'resources':      '',
     'file-url':       '',
     'disable-update': true,

@@ -118,6 +118,7 @@ Copy `.env.example` to `.env` and fill in your values:
 | `PORT` | `3000` | Host port |
 | `TOTP_SECRET` | _(empty — auth disabled)_ | Base-32 TOTP secret; set to enable auth. Generate with `node -e "const {authenticator}=require('otplib');console.log(authenticator.generateSecret())"` then visit `/__totp-setup?token=YOUR_SECRET` to scan the QR code. |
 | `WATCH_POLLING` | `false` | Set to `true` on network filesystems (NFS, SMB, rclone) that don't support inotify |
+| `TRUST_PROXY` | `false` | Set to `true` only when the server sits behind a reverse proxy / tunnel (nginx, Caddy, cloudflared) so login rate limiting uses the `X-Forwarded-For` client IP. Leave `false` on a directly exposed port — the header is client-forgeable there. |
 
 ### Notes
 

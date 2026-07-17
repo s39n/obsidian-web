@@ -20,8 +20,16 @@ const path = require('path');
 const { WebSocketServer } = require('ws');
 const config = require('../config');
 
-function attachWatchServer(httpServer, vaultRegistry, fallbackVaultRoot) {
-  const wss = new WebSocketServer({ server: httpServer, path: '/api/watch' });
+function attachWatchServer(httpServer, vaultRegistry, fallbackVaultRoot, isAuthenticated) {
+  // WebSocket upgrades never pass through Express middleware, so when TOTP
+  // auth is enabled the session cookie must be verified here — otherwise an
+  // unauthenticated client could subscribe to file-change events (vault file
+  // and folder names). Rejected upgrades get a plain HTTP 401.
+  const wss = new WebSocketServer({
+    server: httpServer,
+    path: '/api/watch',
+    verifyClient: (info) => !isAuthenticated || isAuthenticated(info.req),
+  });
 
   // Shared watchers: vaultRoot → { watcher, clients: Set<ws> }
   const sharedWatchers = new Map();

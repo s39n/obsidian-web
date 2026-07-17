@@ -91,8 +91,11 @@ function createElectronRouter(vaultRegistry, fallbackVaultRoot) {
   });
 
   // ipcRenderer.sendSync('frame')
+  // 'native' — the browser provides the window chrome. 'hidden' would make
+  // Obsidian reserve a frameless-window titlebar (drag region + min/max/close
+  // buttons that can't exist in a browser), leaving a tall empty header strip.
   router.get('/frame', (req, res) => {
-    res.json({ value: 'hidden' });
+    res.json({ value: 'native' });
   });
 
   // ipcRenderer.sendSync('documents-dir') / 'desktop-dir'

@@ -173,6 +173,9 @@ function createApp(appConfig = config) {
   app.use('/api/electron', createElectronRouter(vaultRegistry, appConfig.vaultPath));
 
   app.locals.vaultRegistry = vaultRegistry;
+  // Session check for non-Express entry points (the /api/watch WebSocket
+  // upgrade bypasses Express middleware entirely). Null when auth is disabled.
+  app.locals.isAuthenticated = authMiddleware ? authMiddleware.isAuthenticated : null;
   return app;
 }
 
@@ -183,7 +186,8 @@ function startServer(appConfig = config) {
 
   const app = createApp(appConfig);
   const server = http.createServer(app);
-  attachWatchServer(server, app.locals.vaultRegistry, appConfig.vaultPath);
+  attachWatchServer(server, app.locals.vaultRegistry, appConfig.vaultPath,
+    app.locals.isAuthenticated);
 
   server.listen(appConfig.port, appConfig.host, () => {
     console.log('==========================================');

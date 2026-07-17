@@ -11,7 +11,7 @@ const SIMPLE_VALUES = {
   'is-dev':         false,
   'is-quitting':    false,
   'resources':      '',
-  'frame':          'hidden',
+  'frame':          'native',
   'version':        APP_VERSION,
   'update':         '',
   'check-update':   false,

@@ -23,6 +23,31 @@ const TOTP_SECRET = process.env.TOTP_SECRET || '';
 const COOKIE      = 'obsidian-web-session';
 const MAX_AGE     = 7 * 24 * 60 * 60; // 7 days
 
+// Only honor X-Forwarded-For when explicitly told the server sits behind a
+// trusted proxy (cloudflared, nginx, …). On a directly exposed port the header
+// is attacker-controlled: a client could rotate fake IPs to reset the
+// per-IP login rate limit and brute-force the 6-digit TOTP code.
+const TRUST_PROXY = process.env.TRUST_PROXY === 'true';
+
+// Constant-time string comparison (hash first so unequal lengths don't
+// short-circuit timingSafeEqual).
+function safeEqual(a, b) {
+  const ha = crypto.createHash('sha256').update(String(a)).digest();
+  const hb = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
+
+// Restrict post-login redirect targets to local absolute paths. Anything else
+// ("https://evil.example", "//evil.example", "/\\evil.example") falls back to
+// "/" — an open redirect is a phishing aid on a login flow.
+function safeRedirectPath(next) {
+  const dest = String(next || '/');
+  if (dest.startsWith('/') && !dest.startsWith('//') && !dest.startsWith('/\\')) {
+    return dest;
+  }
+  return '/';
+}
+
 // Allow 1 step (±30 s) of clock drift between phone and server
 authenticator.options = { window: 1 };
 
@@ -109,9 +134,12 @@ class RateLimiter {
 
   clientIp(req) {
     // Behind cloudflared/reverse proxies the socket address is the proxy;
-    // use the first forwarded hop when present.
-    const fwd = req.headers['x-forwarded-for'];
-    if (fwd) return String(fwd).split(',')[0].trim();
+    // use the first forwarded hop — but only when TRUST_PROXY=true, since a
+    // direct client can forge the header to dodge rate limiting.
+    if (TRUST_PROXY) {
+      const fwd = req.headers['x-forwarded-for'];
+      if (fwd) return String(fwd).split(',')[0].trim();
+    }
     return req.socket.remoteAddress || 'unknown';
   }
 
@@ -312,11 +340,18 @@ function createAuthMiddleware(appConfig = {}) {
     return sessions.has(parseCookies(req)[COOKIE]);
   }
 
-  return async function authMiddleware(req, res, next) {
+  async function authMiddleware(req, res, next) {
 
-    // ── Setup page ── requires ?token=TOTP_SECRET so only the owner can view it
+    // ── Setup page ── requires ?token=TOTP_SECRET so only the owner can view it.
+    // Shares the login rate limiter and uses a constant-time compare so the
+    // secret can't be probed by brute force or timing.
     if (req.path === '/__totp-setup') {
-      if ((req.query?.token || '') !== TOTP_SECRET) {
+      if (limiter.isBlocked(req)) {
+        return res.status(429)
+          .end('Too many failed attempts — try again in a few minutes.');
+      }
+      if (!safeEqual(req.query?.token || '', TOTP_SECRET)) {
+        limiter.recordFailure(req);
         return res.status(403).end('Forbidden — add ?token=YOUR_TOTP_SECRET to the URL');
       }
       const html = await buildSetupPage(TOTP_SECRET);
@@ -331,7 +366,7 @@ function createAuthMiddleware(appConfig = {}) {
           .end('Too many failed attempts — try again in a few minutes.');
       }
       const code = String(req.query?.code || '').replace(/\D/g, '');
-      const dest = req.query?.next || '/';
+      const dest = safeRedirectPath(req.query?.next);
       if (code.length === 6 && authenticator.verify({ token: code, secret: TOTP_SECRET })) {
         limiter.recordSuccess(req);
         const token = sessions.create();
@@ -364,7 +399,12 @@ function createAuthMiddleware(appConfig = {}) {
       return res.status(401).json({ error: 'Unauthorized — valid TOTP session required' });
     }
     res.redirect(`/__login?next=${encodeURIComponent(req.originalUrl)}`);
-  };
+  }
+
+  // Exposed so non-Express entry points (the /api/watch WebSocket upgrade,
+  // which never passes through Express middleware) can run the same check.
+  authMiddleware.isAuthenticated = isAuthenticated;
+  return authMiddleware;
 }
 
 module.exports = { createAuthMiddleware };

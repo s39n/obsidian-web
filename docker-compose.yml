@@ -33,6 +33,9 @@ services:
       # Then set TOTP_SECRET in Dockhand's env editor or in a .env file.
       # Visit /__totp-setup?token=YOUR_SECRET to scan the QR code.
       TOTP_SECRET: "${TOTP_SECRET:-}"
+      # Set to "true" only when behind a reverse proxy/tunnel (cloudflared,
+      # nginx) so login rate limiting reads the X-Forwarded-For client IP.
+      TRUST_PROXY: "${TRUST_PROXY:-false}"
     env_file:
       - path: .env
         required: false

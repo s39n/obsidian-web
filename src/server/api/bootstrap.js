@@ -248,7 +248,9 @@ async function _buildCacheEntry(vaultId, vaultRoot, vaultRegistry, full = false)
     'vault-list':     vaultRegistry.list(),
     'is-dev':         false,
     'version':        APP_VERSION,
-    'frame':          'hidden',
+    // 'native': browser supplies window chrome; 'hidden' would reserve an
+    // empty frameless titlebar (see api/electron.js /frame).
+    'frame':          'native',
     'resources':      '',
     'file-url':       '',
     'disable-update': true,

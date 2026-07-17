@@ -144,6 +144,12 @@ On plain HTTP all of the following must be polyfilled / shimmed:
 - Generate a secret: `node -e "const {authenticator}=require('otplib');console.log(authenticator.generateSecret())"`
 - Scan QR code: visit `/__totp-setup?token=YOUR_SECRET` after starting the server.
 - Sessions are random per-login tokens persisted in `user-data/.sessions.json`
-  (7-day expiry). Failed TOTP attempts are rate-limited to 5 per IP per 15 min.
+  (7-day expiry). Failed TOTP attempts (login and `/__totp-setup` token
+  guesses) are rate-limited to 5 per IP per 15 min.
+- Set `TRUST_PROXY=true` only behind a reverse proxy/tunnel so rate limiting
+  keys on the `X-Forwarded-For` client IP; on a directly exposed port the
+  header is client-forgeable and is ignored.
+- The `/api/watch` WebSocket upgrade bypasses Express middleware; it runs the
+  same session check via `verifyClient` (see `attachWatchServer`).
 - `/api/vaults/open` only accepts paths under `VAULTS_ROOT` (default
   `user-data/`). Set `VAULTS_ROOT=*` to disable the restriction.
