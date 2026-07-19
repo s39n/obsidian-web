@@ -22,6 +22,16 @@
   var LOCAL_PREFIX = 'obsidian-web:'; // stays per-device
   var FLUSH_DELAY_MS = 300;
 
+  // Device-specific Obsidian keys that must NEVER roam through the server
+  // store. EmulateMobile=1 synced from a phone puts the desktop client into
+  // mobile emulation — fake 59px notch inset, tablet layout, "huge header".
+  var DEVICE_LOCAL_KEYS = { 'EmulateMobile': 1, 'DebugMode': 1 };
+
+  function isDeviceLocal(key) {
+    return key.indexOf(LOCAL_PREFIX) === 0 ||
+      Object.prototype.hasOwnProperty.call(DEVICE_LOCAL_KEYS, key);
+  }
+
   window.__owInstallRemoteLocalStorage = function () {
     var native = window.localStorage;
 
@@ -34,6 +44,12 @@
         var mem = {};
         Object.keys(serverData).forEach(function (k) { mem[k] = String(serverData[k]); });
 
+        // Purge device-local keys that leaked into the server store before
+        // this guard existed (e.g. a phone's EmulateMobile=1) — both from the
+        // in-memory view and, below via queue(), from the server itself.
+        var purge = Object.keys(mem).filter(isDeviceLocal);
+        purge.forEach(function (k) { delete mem[k]; });
+
         // One-time migration: keys already in this device's native storage
         // but missing on the server get uploaded, so the first PC that runs
         // this seeds the server store with its existing tokens/state.
@@ -41,7 +57,7 @@
         var seeded = 0;
         for (var i = 0; i < native.length; i++) {
           var k = native.key(i);
-          if (k.indexOf(LOCAL_PREFIX) === 0) continue;
+          if (isDeviceLocal(k)) continue;
           if (!(k in mem)) {
             var v = native.getItem(k);
             mem[k] = v;
@@ -98,18 +114,18 @@
         var storageShim = {
           getItem: function (key) {
             key = String(key);
-            if (key.indexOf(LOCAL_PREFIX) === 0) return native.getItem(key);
+            if (isDeviceLocal(key)) return native.getItem(key);
             return Object.prototype.hasOwnProperty.call(mem, key) ? mem[key] : null;
           },
           setItem: function (key, value) {
             key = String(key); value = String(value);
-            if (key.indexOf(LOCAL_PREFIX) === 0) return native.setItem(key, value);
+            if (isDeviceLocal(key)) return native.setItem(key, value);
             mem[key] = value;
             queue(key, value);
           },
           removeItem: function (key) {
             key = String(key);
-            if (key.indexOf(LOCAL_PREFIX) === 0) return native.removeItem(key);
+            if (isDeviceLocal(key)) return native.removeItem(key);
             if (Object.prototype.hasOwnProperty.call(mem, key)) {
               delete mem[key];
               queue(key, null);
@@ -125,8 +141,13 @@
             return n >= 0 && n < keys.length ? keys[n] : null;
           },
         };
+        // configurable: true is required — the Proxy's ownKeys trap doesn't
+        // report 'length', which violates the proxy invariant for
+        // non-configurable properties and makes Object.keys(localStorage)
+        // throw ("trap result did not include 'length'").
         Object.defineProperty(storageShim, 'length', {
           get: function () { return Object.keys(mem).length; },
+          configurable: true,
         });
 
         // Proxy catches direct property access (localStorage.foo = 'x' /
@@ -165,6 +186,12 @@
           value: proxy,
           configurable: true,
         });
+
+        // Delete leaked device-local keys from the server store.
+        purge.forEach(function (k) { queue(k, null); });
+        if (purge.length > 0) {
+          console.log('[obsidian-web] remote localStorage: purged device-local keys from server: ' + purge.join(', '));
+        }
 
         // Upload the migration seed after install so it can't race the map.
         if (seeded > 0) {
